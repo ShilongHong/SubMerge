@@ -14,6 +14,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 限制上传文件大小为16MB
 
+
+def log(msg):
+    """带时间戳的日志输出（立即刷新）"""
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] {msg}", flush=True)
+
 # 配置存储目录
 CONFIGS_DIR = 'configs'
 if not os.path.exists(CONFIGS_DIR):
@@ -73,10 +78,10 @@ def save_subscription_cache(url, content_dict, userinfo=''):
         with open(cache_file, 'w', encoding='utf-8') as f:
             json.dump(cache_data, f, ensure_ascii=False, indent=2)
         
-        print(f"   ✅ 订阅已缓存到本地: {cache_file}")
+        log(f"   ✅ 订阅已缓存到本地: {cache_file}")
         return True
     except Exception as e:
-        print(f"   ⚠️ 缓存保存失败: {e}")
+        log(f"   ⚠️ 缓存保存失败: {e}")
         return False
 
 def load_subscription_cache(url):
@@ -92,11 +97,11 @@ def load_subscription_cache(url):
             cache_data = json.load(f)
         
         cached_time = cache_data.get('cached_at', '未知时间')
-        print(f"   📦 使用本地缓存（缓存时间: {cached_time}）")
+        log(f"   📦 使用本地缓存（缓存时间: {cached_time}）")
         
         return cache_data.get('content'), cache_data.get('userinfo', '')
     except Exception as e:
-        print(f"   ⚠️ 缓存加载失败: {e}")
+        log(f"   ⚠️ 缓存加载失败: {e}")
         return None, None
 
 def parse_traffic_info(userinfo):
@@ -157,7 +162,7 @@ def parse_traffic_info(userinfo):
         return f"♻️ 剩余{remaining_gb}G/总{total_gb}G | 到期{expire_str}"
         
     except Exception as e:
-        print(f"解析流量信息失败: {e}")
+        log(f"解析流量信息失败: {e}")
         return "♻️ 余量获取"
 
 def get_config_file_path(token):
@@ -183,7 +188,7 @@ def save_config(token, config):
             json.dump(config, f, ensure_ascii=False, indent=2)
         return True
     except Exception as e:
-        print(f"保存配置失败: {e}")
+        log(f"保存配置失败: {e}")
         return False
 
 def delete_config(token):
@@ -262,7 +267,7 @@ def parse_proxy_uri(uri):
                 
                 return proxy
             except Exception as e:
-                print(f"   解析 VMess 失败: {e}")
+                log(f"   解析 VMess 失败: {e}")
                 return None
         
         # VLESS 协议
@@ -326,7 +331,7 @@ def parse_proxy_uri(uri):
                 
                 return proxy
             except Exception as e:
-                print(f"   解析 VLESS 失败: {e}")
+                log(f"   解析 VLESS 失败: {e}")
                 return None
         
         # SS 协议
@@ -374,7 +379,7 @@ def parse_proxy_uri(uri):
                 }
                 return proxy
             except Exception as e:
-                print(f"   解析 SS 失败: {e}")
+                log(f"   解析 SS 失败: {e}")
                 return None
         
         # Trojan 协议
@@ -422,7 +427,7 @@ def parse_proxy_uri(uri):
                 
                 return proxy
             except Exception as e:
-                print(f"   解析 Trojan 失败: {e}")
+                log(f"   解析 Trojan 失败: {e}")
                 return None
         
         # Hysteria2 协议
@@ -452,11 +457,11 @@ def parse_proxy_uri(uri):
                 
                 return proxy
             except Exception as e:
-                print(f"   解析 Hysteria2 失败: {e}")
+                log(f"   解析 Hysteria2 失败: {e}")
                 return None
     
     except Exception as e:
-        print(f"   解析代理 URI 失败: {e}")
+        log(f"   解析代理 URI 失败: {e}")
     
     return None
 
@@ -469,7 +474,7 @@ def parse_uri_list(text):
     lines = text.strip().split('\n')
     proxies = []
     
-    print(f"   URI列表共 {len(lines)} 行")
+    log(f"   URI列表共 {len(lines)} 行")
     
     for i, line in enumerate(lines):
         line = line.strip()
@@ -479,22 +484,22 @@ def parse_uri_list(text):
         # 打印前几个 URI 的类型
         if i < 5:
             proto = line.split('://')[0] if '://' in line else 'unknown'
-            print(f"   第{i+1}行协议: {proto}")
+            log(f"   第{i+1}行协议: {proto}")
         
         proxy = parse_proxy_uri(line)
         if proxy:
             proxies.append(proxy)
             if i < 5:
-                print(f"      ✅ 解析成功: {proxy.get('name', 'unnamed')}")
+                log(f"      ✅ 解析成功: {proxy.get('name', 'unnamed')}")
         else:
             if i < 5:
-                print(f"      ❌ 解析失败")
+                log(f"      ❌ 解析失败")
     
     if not proxies:
-        print(f"   ⚠️ 没有成功解析任何节点")
+        log(f"   ⚠️ 没有成功解析任何节点")
         return None
     
-    print(f"   解析到 {len(proxies)} 个节点（URI格式）")
+    log(f"   解析到 {len(proxies)} 个节点（URI格式）")
     
     # 构建基础 Clash 配置
     config = {
@@ -536,13 +541,13 @@ def download_subscription(url, use_cache=True):
     }
 
     try:
-        print(f"下载订阅: {url[:60]}...")
+        log(f"下载订阅: {url[:60]}...")
         response = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
         response.raise_for_status()
 
         userinfo = response.headers.get('subscription-userinfo', '') or response.headers.get('Subscription-Userinfo', '')
         if userinfo:
-            print(f"   获取到流量信息: {userinfo[:50]}...")
+            log(f"   获取到流量信息: {userinfo[:50]}...")
 
         raw_text = response.text
 
@@ -551,12 +556,12 @@ def download_subscription(url, use_cache=True):
             cleaned_text = clean_yaml_text(raw_text)
             content = yaml.safe_load(cleaned_text)
             if content and isinstance(content, dict) and ('proxies' in content or 'proxy-groups' in content):
-                print("[OK] YAML")
+                log("[OK] YAML")
                 if use_cache:
                     save_subscription_cache(url, content, userinfo)
                 return content, userinfo
         except Exception as e:
-            print(f"   YAML: {e}")
+            log(f"   YAML: {e}")
 
         # 2. base64
         try:
@@ -569,7 +574,7 @@ def download_subscription(url, use_cache=True):
             try:
                 content = yaml.safe_load(decoded)
                 if content and isinstance(content, dict) and ('proxies' in content or 'proxy-groups' in content):
-                    print("[OK] base64+YAML")
+                    log("[OK] base64+YAML")
                     if use_cache:
                         save_subscription_cache(url, content, userinfo)
                     return content, userinfo
@@ -578,7 +583,7 @@ def download_subscription(url, use_cache=True):
                     cleaned_decoded = clean_yaml_text(decoded)
                     content = yaml.safe_load(cleaned_decoded)
                     if content and isinstance(content, dict) and ('proxies' in content or 'proxy-groups' in content):
-                        print("[OK] base64+YAML(cleaned)")
+                        log("[OK] base64+YAML(cleaned)")
                         if use_cache:
                             save_subscription_cache(url, content, userinfo)
                         return content, userinfo
@@ -588,40 +593,40 @@ def download_subscription(url, use_cache=True):
             if any(proto in decoded for proto in ['vless://', 'vmess://', 'ss://', 'trojan://', 'hysteria2://', 'hy2://']):
                 content = parse_uri_list(decoded)
                 if content:
-                    print("[OK] base64+URI")
+                    log("[OK] base64+URI")
                     if use_cache:
                         save_subscription_cache(url, content, userinfo)
                     return content, userinfo
         except Exception as e:
-            print(f"   base64: {e}")
+            log(f"   base64: {e}")
 
         # 3. URI
         if any(proto in raw_text for proto in ['vless://', 'vmess://', 'ss://', 'trojan://', 'hysteria2://', 'hy2://']):
             content = parse_uri_list(raw_text)
             if content:
-                print("[OK] URI")
+                log("[OK] URI")
                 if use_cache:
                     save_subscription_cache(url, content, userinfo)
                 return content, userinfo
 
-        print(f"   [WARN] unrecognized, first 100: {raw_text[:100]}")
+        log(f"   [WARN] unrecognized, first 100: {raw_text[:100]}")
         return None, userinfo
 
     except requests.exceptions.HTTPError as e:
         status_code = e.response.status_code if e.response else 'Unknown'
-        print(f"[ERROR] HTTP {status_code}")
+        log(f"[ERROR] HTTP {status_code}")
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
-        print(f"[ERROR] network: {e}")
+        log(f"[ERROR] network: {e}")
     except Exception as e:
-        print(f"[ERROR] {e}")
+        log(f"[ERROR] {e}")
 
     if use_cache:
-        print("   trying cache...")
+        log("   trying cache...")
         cached_content, cached_userinfo = load_subscription_cache(url)
         if cached_content:
-            print("[OK] cache hit")
+            log("[OK] cache hit")
             return cached_content, cached_userinfo
-        print("   no cache")
+        log("   no cache")
 
     return None, None
 
@@ -636,10 +641,10 @@ def parse_local_subscription(content):
         cleaned_content = clean_yaml_text(content)
         config = yaml.safe_load(cleaned_content)
         if config and isinstance(config, dict) and ('proxies' in config or 'proxy-groups' in config):
-            print(f"   ✅ 本地内容解析成功（YAML格式）")
+            log(f"   ✅ 本地内容解析成功（YAML格式）")
             return config
     except Exception as e:
-        print(f"   本地 YAML 解析失败: {e}")
+        log(f"   本地 YAML 解析失败: {e}")
     
     # 2. 尝试 base64 解码后解析
     try:
@@ -655,29 +660,29 @@ def parse_local_subscription(content):
             cleaned_decoded = clean_yaml_text(decoded)
             config = yaml.safe_load(cleaned_decoded)
             if config and isinstance(config, dict) and ('proxies' in config or 'proxy-groups' in config):
-                print(f"   ✅ 本地内容解析成功（base64 + YAML）")
+                log(f"   ✅ 本地内容解析成功（base64 + YAML）")
                 return config
         except Exception as e:
-            print(f"   base64解码后 YAML 解析失败: {e}")
+            log(f"   base64解码后 YAML 解析失败: {e}")
         
         # 2.2 尝试 URI 列表格式
         if any(proto in decoded for proto in ['vless://', 'vmess://', 'ss://', 'trojan://', 'hysteria2://', 'hy2://']):
             config = parse_uri_list(decoded)
             if config:
-                print(f"   ✅ 本地内容解析成功（base64 + URI列表）")
+                log(f"   ✅ 本地内容解析成功（base64 + URI列表）")
                 return config
                 
     except Exception as e:
-        print(f"   base64 解码失败: {e}")
+        log(f"   base64 解码失败: {e}")
     
     # 3. 直接尝试 URI 列表格式
     if any(proto in content for proto in ['vless://', 'vmess://', 'ss://', 'trojan://', 'hysteria2://', 'hy2://']):
         config = parse_uri_list(content)
         if config:
-            print(f"   ✅ 本地内容解析成功（URI列表）")
+            log(f"   ✅ 本地内容解析成功（URI列表）")
             return config
     
-    print(f"   ❌ 本地内容无法解析，前100字符: {content[:100]}")
+    log(f"   ❌ 本地内容无法解析，前100字符: {content[:100]}")
     return None
 
 def merge_subscriptions(subscriptions):
@@ -701,7 +706,7 @@ def merge_subscriptions(subscriptions):
         is_main = sub_info.get('is_main', False)
 
         if sub_content:
-            print(f"处理本地订阅: {sub_name}")
+            log(f"处理本地订阅: {sub_name}")
             sub = parse_local_subscription(sub_content)
             if not sub:
                 return None, f"{sub_name} 解析失败（本地内容格式错误）", []
@@ -725,7 +730,7 @@ def merge_subscriptions(subscriptions):
             idx, sub_info = args
             return idx, sub_info, download_subscription(sub_info['url'])
 
-        print(f"并行下载 {len(remote_subs)} 个远程订阅...")
+        log(f"并行下载 {len(remote_subs)} 个远程订阅...")
         with ThreadPoolExecutor(max_workers=min(len(remote_subs), 4)) as executor:
             futures = {executor.submit(_download_one, args): args for args in remote_subs}
             for future in as_completed(futures):
@@ -736,10 +741,10 @@ def merge_subscriptions(subscriptions):
                 if not sub:
                     if is_main:
                         return None, f"{sub_name}（主订阅）下载失败", []
-                    print(f"[WARN] 跳过失败的订阅: {sub_name}")
+                    log(f"[WARN] 跳过失败的订阅: {sub_name}")
                     continue
 
-                print(f"[OK] {sub_name} 下载完成")
+                log(f"[OK] {sub_name} 下载完成")
                 userinfo_list.append({'name': sub_name, 'userinfo': userinfo, 'is_local': False})
                 if userinfo and not primary_userinfo:
                     primary_userinfo = userinfo
@@ -757,9 +762,19 @@ def merge_subscriptions(subscriptions):
 
     if not downloaded_subs:
         return None, "所有订阅均下载失败", []
-    
-    # 如果没有指定主订阅，使用第一个
-    if not main_sub:
+
+    # 按 subscriptions 原始顺序排序 downloaded_subs，确保与用户配置一致
+    downloaded_subs.sort(key=lambda x: x['index'])
+
+    # 从 downloaded_subs 中正确找到主订阅
+    if main_sub:
+        for i, ds in enumerate(downloaded_subs):
+            if ds.get('is_main'):
+                main_sub = ds['data']
+                main_sub_index = i
+                break
+    else:
+        # 如果没有指定主订阅，使用第一个
         main_sub = downloaded_subs[0]['data']
         downloaded_subs[0]['is_main'] = True
         main_sub_index = 0
@@ -798,7 +813,7 @@ def merge_subscriptions(subscriptions):
         for proxy in proxies:
             ptype = proxy.get('type', 'unknown')
             type_count[ptype] = type_count.get(ptype, 0) + 1
-        print(f"   [{sub_name}] 节点类型统计: {type_count}")
+        log(f"   [{sub_name}] 节点类型统计: {type_count}")
         
         for proxy in proxies:
             if proxy.get('name'):
@@ -1002,10 +1017,25 @@ def merge_subscriptions(subscriptions):
     
     # 处理主订阅的代理组，将新增的代理组添加到每个代理组中
     original_groups = main_sub.get('proxy-groups', [])
-    
+
+    # 收集已有的组名，防止重复
+    existing_group_names = set(g['name'] for g in proxy_groups)
+
+    # 构建重命名映射：原始组名 -> 重命名后的组名（冲突时加 _group 后缀）
+    group_rename_map = {}
     for group in original_groups:
+        gname = group.get('name', '')
+        if gname in existing_group_names:
+            group_rename_map[gname] = f"{gname}_group"
+
+    for group in original_groups:
+        gname = group.get('name', '')
+        # 如果组名冲突，使用重命名后的名称
+        new_name = group_rename_map.get(gname, gname)
+
         new_group = group.copy()
-        
+        new_group['name'] = new_name
+
         # 如果代理组有 proxies 列表
         if 'proxies' in new_group:
             # 保存原有规则组的第一个节点（默认选中的节点）
@@ -1020,9 +1050,11 @@ def merge_subscriptions(subscriptions):
                     # 只有当主订阅参与规则时，才保留主订阅的原始节点引用
                     if main_in_rules:
                         processed_default = prefixed_default
-                # 保留代理组引用和其他特殊值
-                elif (original_default in [g['name'] for g in original_groups] or 
-                      original_default in used_names or 
+                # 保留代理组引用和其他特殊值（重命名的组用新名称）
+                elif original_default in group_rename_map:
+                    processed_default = group_rename_map[original_default]
+                elif (original_default in [g['name'] for g in original_groups] or
+                      original_default in used_names or
                       original_default in ['DIRECT', 'REJECT'] or
                       original_default in new_group_names or
                       original_default in auto_group_names):
@@ -1059,10 +1091,14 @@ def merge_subscriptions(subscriptions):
                         else:
                             # 主订阅不参与规则，跳过这个节点
                             continue
-                    
+
+                    # 重命名的组引用也要映射
+                    if proxy_ref in group_rename_map:
+                        proxy_ref = group_rename_map[proxy_ref]
+
                     # 保留代理组引用和其他特殊值
-                    if (proxy_ref in [g['name'] for g in original_groups] or 
-                        proxy_ref in used_names or 
+                    if (proxy_ref in [g['name'] for g in original_groups] or
+                        proxy_ref in used_names or
                         proxy_ref in ['DIRECT', 'REJECT']):
                         new_proxies.append(proxy_ref)
             
@@ -1079,6 +1115,15 @@ def merge_subscriptions(subscriptions):
     
     # 使用主订阅的规则
     original_rules = main_sub.get('rules', [])
+
+    # 如果有组名被重命名，规则中引用该组名的地方也要同步更新
+    if group_rename_map:
+        original_rules = [
+            rule.rsplit(',', 1)[0] + ',' + group_rename_map.get(rule.rsplit(',', 1)[-1], rule.rsplit(',', 1)[-1])
+            if ',' in rule and rule.rsplit(',', 1)[-1] in group_rename_map
+            else rule
+            for rule in original_rules
+        ]
     
     # 添加默认的下载规则（在原有规则之前）
     download_rules = [
@@ -1287,7 +1332,7 @@ def merge_subscriptions(subscriptions):
             if group_name in valid_group_names:
                 valid_rules.append(rule)
             else:
-                print(f"   ⚠️ 移除无效规则 (代理组不存在): {rule} -> 找不到组: [{group_name}]")
+                log(f"   ⚠️ 移除无效规则 (代理组不存在): {rule} -> 找不到组: [{group_name}]")
                 # 调试：打印有效组名
                 # print(f"      有效组名: {list(valid_group_names)[:5]}...")
         else:
@@ -1409,10 +1454,10 @@ def update_config(token):
                         # 对比 MD5，有变化才保存
                         if new_md5 != old_file_md5:
                             file_md5 = save_uploaded_file(sub_content)
-                            print(f"   文件内容已更新: {sub_name}, MD5: {file_md5}")
+                            log(f"   文件内容已更新: {sub_name}, MD5: {file_md5}")
                         else:
                             file_md5 = old_file_md5
-                            print(f"   文件内容未变化: {sub_name}, MD5: {file_md5}")
+                            log(f"   文件内容未变化: {sub_name}, MD5: {file_md5}")
                 elif old_file_md5:
                     # 没有新上传文件，使用旧的 MD5
                     file_md5 = old_file_md5
@@ -1497,7 +1542,7 @@ def create_subscription():
                         sub_content = file.read().decode('utf-8')
                         # 保存文件并获取 MD5
                         file_md5 = save_uploaded_file(sub_content)
-                        print(f"   新建订阅文件: {sub_name}, MD5: {file_md5}")
+                        log(f"   新建订阅文件: {sub_name}, MD5: {file_md5}")
                 
                 # URL和文件内容至少有一个
                 if sub_name and (sub_url or file_md5):
@@ -1555,7 +1600,7 @@ def create_subscription():
 def subscribe_with_token():
     """通过Token获取订阅"""
     ua = request.headers.get('User-Agent', 'unknown')
-    print(f"[Client UA] {ua}")
+    log(f"[Client UA] {ua}")
     token = request.args.get('token', '')
     
     if not token:
@@ -1573,37 +1618,44 @@ def subscribe_with_token():
             content = load_uploaded_file(file_md5)
             if content:
                 sub['content'] = content
-                print(f"   从本地加载文件: {sub['name']}, MD5: {file_md5}")
+                log(f"   从本地加载文件: {sub['name']}, MD5: {file_md5}")
             else:
-                print(f"   ⚠️ 文件不存在: {sub['name']}, MD5: {file_md5}")
+                log(f"   ⚠️ 文件不存在: {sub['name']}, MD5: {file_md5}")
     
     try:
         # 合并订阅
         merged_config, error, userinfo_list = merge_subscriptions(subscriptions)
         
         if error:
-            print(f"❌ 合并订阅失败: {error}")
+            log(f"❌ 合并订阅失败: {error}")
             return Response(f'错误: {error}', status=500)
         
-        print(f"✅ 合并完成，共 {len(merged_config.get('proxies', []))} 个节点")
+        log(f"✅ 合并完成，共 {len(merged_config.get('proxies', []))} 个节点")
         
         # 合并所有订阅的流量信息（优先使用主订阅的，如果没有则使用第一个）
         subscription_userinfo = ''
         if userinfo_list:
-            # 优先使用有流量信息的订阅
-            for info in userinfo_list:
-                if info and isinstance(info, dict) and info.get('userinfo'):
-                    subscription_userinfo = info['userinfo']
-                    print(f"使用 {info.get('name', '未知')} 的流量信息")
-                    break
+            # 优先使用主订阅的流量信息
+            main_sub_name = subscriptions[0].get('name', '') if not any(s.get('is_main') for s in subscriptions) else next((s['name'] for s in subscriptions if s.get('is_main')), '')
+            main_userinfo = next((info.get('userinfo', '') for info in userinfo_list if info.get('name') == main_sub_name and info.get('userinfo')), '')
+            if main_userinfo:
+                subscription_userinfo = main_userinfo
+                log(f"使用主订阅 {main_sub_name} 的流量信息")
+            else:
+                # 主订阅没有流量信息，使用第一个有的
+                for info in userinfo_list:
+                    if info and isinstance(info, dict) and info.get('userinfo'):
+                        subscription_userinfo = info['userinfo']
+                        log(f"使用 {info.get('name', '未知')} 的流量信息")
+                        break
         
         if not subscription_userinfo:
-            print("⚠️ 没有获取到流量信息，将不显示余量")
+            log("⚠️ 没有获取到流量信息，将不显示余量")
         
         # 转换为YAML
-        print("正在生成 YAML...")
+        log("正在生成 YAML...")
         yaml_content = yaml.dump(merged_config, allow_unicode=True)
-        print(f"✅ YAML 生成成功，长度: {len(yaml_content)}")
+        log(f"✅ YAML 生成成功，长度: {len(yaml_content)}")
         
         response_headers = {
             'Content-Disposition': f'attachment; filename=clash_config_{datetime.now().strftime("%Y%m%d_%H%M%S")}.yaml',
@@ -1618,9 +1670,10 @@ def subscribe_with_token():
         )
     except Exception as e:
         import traceback
-        print(f"❌ 订阅处理异常: {e}")
-        traceback.print_exc()
-        return Response(f'生成配置失败: {str(e)}', status=500)
+        error_detail = traceback.format_exc()
+        log(f"❌ 订阅处理异常: {e}")
+        log(error_detail)
+        return Response(f'生成配置失败: {str(e)}\n\n详细错误:\n{error_detail}', status=500)
 
 @app.route('/subscribe')
 def subscribe():
@@ -1649,13 +1702,18 @@ def subscribe():
     if error:
         return Response(f'错误: {error}', status=500)
     
-    # 合并所有订阅的流量信息
+    # 合并所有订阅的流量信息（优先使用主订阅的）
     subscription_userinfo = ''
     if userinfo_list:
-        for info in userinfo_list:
-            if info and isinstance(info, dict) and info.get('userinfo'):
-                subscription_userinfo = info['userinfo']
-                break
+        # 主订阅是 sub1
+        main_userinfo = next((info.get('userinfo', '') for info in userinfo_list if info.get('name') == sub1_name and info.get('userinfo')), '')
+        if main_userinfo:
+            subscription_userinfo = main_userinfo
+        else:
+            for info in userinfo_list:
+                if info and isinstance(info, dict) and info.get('userinfo'):
+                    subscription_userinfo = info['userinfo']
+                    break
     
     # 转换为YAML
     try:

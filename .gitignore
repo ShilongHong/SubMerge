@@ -28,3 +28,18 @@ Thumbs.db
 
 # 日志
 *.log
+
+# Node.js 构建辅助
+node_modules/
+package.json
+package-lock.json
+tailwind-input.css
+tailwind.config.js
+
+# Claude Code skills
+.agents/
+skills/
+skills-lock.json
+
+# 临时文件
+temp/
