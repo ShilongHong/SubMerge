@@ -1154,7 +1154,6 @@ def merge_subscriptions(subscriptions):
         'DOMAIN-SUFFIX,dockerhub.com,下载',
         'DOMAIN-SUFFIX,amazonaws.com,下载',
         'DOMAIN-SUFFIX,cloudfront.net,下载',
-        'DOMAIN-SUFFIX,googleapis.com,下载',
         'DOMAIN-SUFFIX,gstatic.com,下载',
         'DOMAIN-SUFFIX,stackoverflow.com,下载',
         'DOMAIN-SUFFIX,arxiv.org,下载',
