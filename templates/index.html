@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="zh-CN" x-data="{ darkMode: localStorage.getItem('darkMode') === 'true' }" :class="{ 'dark': darkMode }">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clash 订阅合成工具</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+                    },
+                    colors: {
+                        primary: {
+                            50: '#eef2ff',
+                            100: '#e0e7ff',
+                            200: '#c7d2fe',
+                            300: '#a5b4fc',
+                            400: '#818cf8',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                            800: '#3730a3',
+                            900: '#312e81',
+                        }
+                    },
+                    animation: {
+                        'float': 'float 6s ease-in-out infinite',
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'slide-up': 'slideUp 0.3s ease-out',
+                        'slide-down': 'slideDown 0.3s ease-out',
+                        'fade-in': 'fadeIn 0.3s ease-out',
+                    },
+                    keyframes: {
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0px)' },
+                            '50%': { transform: 'translateY(-20px)' },
+                        },
+                        slideUp: {
+                            '0%': { transform: 'translateY(10px)', opacity: '0' },
+                            '100%': { transform: 'translateY(0)', opacity: '1' },
+                        },
+                        slideDown: {
+                            '0%': { transform: 'translateY(-10px)', opacity: '0' },
+                            '100%': { transform: 'translateY(0)', opacity: '1' },
+                        },
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' },
+                        },
+                    },
+                    backdropBlur: {
+                        xs: '2px',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* 毛玻璃效果增强 */
+        .glass {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .dark .glass {
+            background: rgba(30, 30, 40, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        /* 背景动画球 */
+        .bg-blob {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(60px);
+            opacity: 0.6;
+            animation: float 8s ease-in-out infinite;
+        }
+        .dark .bg-blob {
+            opacity: 0.3;
+        }
+        
+        /* 自定义滚动条 */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(99, 102, 241, 0.3);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(99, 102, 241, 0.5);
+        }
+        
+        /* Toggle Switch */
+        .toggle-switch {
+            position: relative;
+            width: 44px;
+            height: 24px;
+            background: #e5e7eb;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .toggle-switch.active {
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        }
+        .toggle-switch.active::after {
+            left: 22px;
+        }
+        .dark .toggle-switch {
+            background: #374151;
+        }
+        .dark .toggle-switch::after {
+            background: #9ca3af;
+        }
+        .dark .toggle-switch.active::after {
+            background: white;
+        }
+        
+        /* 文件上传拖拽区域 */
+        .file-drop-zone {
+            border: 2px dashed #d1d5db;
+            transition: all 0.3s ease;
+        }
+        .file-drop-zone:hover, .file-drop-zone.dragover {
+            border-color: #6366f1;
+            background: rgba(99, 102, 241, 0.05);
+        }
+        .file-drop-zone.has-file {
+            border-color: #10b981;
+            background: rgba(16, 185, 129, 0.05);
+        }
+        .dark .file-drop-zone {
+            border-color: #4b5563;
+        }
+        .dark .file-drop-zone:hover, .dark .file-drop-zone.dragover {
+            border-color: #818cf8;
+            background: rgba(129, 140, 248, 0.1);
+        }
+        .dark .file-drop-zone.has-file {
+            border-color: #34d399;
+            background: rgba(52, 211, 153, 0.1);
+        }
+        
+        /* Toast 动画 */
+        .toast-enter {
+            animation: slideDown 0.3s ease-out, fadeIn 0.3s ease-out;
+        }
+        .toast-leave {
+            animation: slideUp 0.3s ease-out reverse, fadeIn 0.3s ease-out reverse;
+        }
+        
+        /* 按钮点击波纹效果 */
+        .ripple {
+            position: relative;
+            overflow: hidden;
+        }
+        .ripple::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            transition: width 0.6s ease, height 0.6s ease;
+        }
+        .ripple:active::before {
+            width: 300px;
+            height: 300px;
+        }
+        
+        /* 输入框聚焦动画 */
+        .input-focus-ring {
+            transition: all 0.2s ease;
+        }
+        .input-focus-ring:focus {
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+        }
+        .dark .input-focus-ring:focus {
+            box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.3);
+        }
+        
+        /* 卡片悬浮效果 */
+        .card-hover {
+            transition: all 0.3s ease;
+        }
+        .card-hover:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+        }
+        .dark .card-hover:hover {
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+        }
+    </style>
+</head>
+<body class="font-sans min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-gray-900 dark:via-slate-900 dark:to-indigo-950 transition-colors duration-300">
+    <!-- 背景装饰球 -->
+    <div class="fixed inset-0 overflow-hidden pointer-events-none">
+        <div class="bg-blob w-96 h-96 bg-primary-400/30 dark:bg-primary-600/20 -top-48 -left-48" style="animation-delay: 0s;"></div>
+        <div class="bg-blob w-80 h-80 bg-purple-400/30 dark:bg-purple-600/20 top-1/3 -right-40" style="animation-delay: 2s;"></div>
+        <div class="bg-blob w-72 h-72 bg-pink-400/20 dark:bg-pink-600/15 bottom-0 left-1/4" style="animation-delay: 4s;"></div>
+    </div>
+
+    <!-- Toast 通知容器 -->
+    <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-3"></div>
+
+    <!-- 主容器 -->
+    <div class="relative min-h-screen py-8 px-4 sm:px-6 lg:px-8">
+        <div class="max-w-3xl mx-auto">
+            <!-- 头部 -->
+            <header class="text-center mb-8 animate-fade-in">
+                <!-- 暗色模式切换 -->
+                <div class="flex justify-end mb-4">
+                    <button 
+                        @click="darkMode = !darkMode; localStorage.setItem('darkMode', darkMode)"
+                        class="p-2.5 rounded-xl glass hover:scale-105 transition-all duration-200 group"
+                        :title="darkMode ? '切换亮色模式' : '切换暗色模式'"
+                    >
+                        <svg x-show="!darkMode" class="w-5 h-5 text-amber-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clip-rule="evenodd"/>
+                        </svg>
+                        <svg x-show="darkMode" class="w-5 h-5 text-indigo-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/>
+                        </svg>
+                    </button>
+                </div>
+                
+                <!-- Logo & 标题 -->
+                <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-purple-600 shadow-lg shadow-primary-500/30 mb-4 animate-float">
+                    <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                    </svg>
+                </div>
+                <h1 class="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-primary-600 via-purple-600 to-pink-600 dark:from-primary-400 dark:via-purple-400 dark:to-pink-400 bg-clip-text text-transparent mb-2">
+                    Clash 订阅合成
+                </h1>
+                <p class="text-gray-500 dark:text-gray-400 text-sm sm:text-base">
+                    多订阅智能合并 · 自动分组管理 · 一键生成链接
+                </p>
+            </header>
+
+            <!-- 主卡片 -->
+            <main class="glass rounded-3xl shadow-xl shadow-gray-200/50 dark:shadow-black/30 p-6 sm:p-8 animate-slide-up">
+                <form id="mergeForm">
+                    <!-- Token 输入区 -->
+                    <div class="mb-8">
+                        <div class="flex items-center gap-2 mb-3">
+                            <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-sm">
+                                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
+                                </svg>
+                            </div>
+                            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Token（可选）</label>
+                            <span class="text-xs text-gray-400 dark:text-gray-500">填写后可更新已有配置</span>
+                        </div>
+                        <div class="flex gap-3">
+                            <input 
+                                type="text" 
+                                id="token" 
+                                name="token" 
+                                placeholder="留空创建新配置，填写则更新现有配置"
+                                class="flex-1 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white/50 dark:bg-gray-800/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 input-focus-ring focus:border-primary-500 dark:focus:border-primary-400 outline-none transition-all"
+                            >
+                            <button 
+                                type="button" 
+                                onclick="loadConfig()"
+                                class="px-5 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-medium shadow-lg shadow-amber-500/25 hover:shadow-amber-500/40 transition-all duration-200 hover:-translate-y-0.5 ripple flex items-center gap-2"
+                            >
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                                </svg>
+                                <span class="hidden sm:inline">加载</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 分隔线 -->
+                    <div class="flex items-center gap-4 mb-6">
+                        <div class="flex-1 h-px bg-gradient-to-r from-transparent via-gray-300 dark:via-gray-600 to-transparent"></div>
+                        <span class="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">订阅配置</span>
+                        <div class="flex-1 h-px bg-gradient-to-r from-transparent via-gray-300 dark:via-gray-600 to-transparent"></div>
+                    </div>
+
+                    <!-- 订阅列表容器 -->
+                    <div id="subscriptions-container" class="space-y-4 mb-6"></div>
+
+                    <!-- 添加订阅按钮 -->
+                    <button 
+                        type="button" 
+                        onclick="addSubscription()"
+                        class="w-full py-3.5 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-primary-400 dark:hover:border-primary-500 text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 font-medium transition-all duration-200 flex items-center justify-center gap-2 group mb-6"
+                    >
+                        <svg class="w-5 h-5 transition-transform group-hover:rotate-90 duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+                        </svg>
+                        添加订阅
+                    </button>
+
+
+                    <!-- 提交按钮 -->
+                    <button 
+                        type="submit"
+                        class="w-full py-4 rounded-xl bg-gradient-to-r from-primary-500 via-purple-500 to-pink-500 hover:from-primary-600 hover:via-purple-600 hover:to-pink-600 text-white font-semibold text-lg shadow-xl shadow-primary-500/30 hover:shadow-primary-500/50 transition-all duration-300 hover:-translate-y-1 ripple flex items-center justify-center gap-3"
+                    >
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                        </svg>
+                        生成订阅链接
+                    </button>
+                </form>
+
+                <!-- 加载状态 -->
+                <div class="loading hidden" id="loading">
+                    <div class="flex flex-col items-center justify-center py-8">
+                        <div class="relative w-16 h-16">
+                            <div class="absolute inset-0 rounded-full border-4 border-primary-200 dark:border-primary-800"></div>
+                            <div class="absolute inset-0 rounded-full border-4 border-transparent border-t-primary-500 animate-spin"></div>
+                        </div>
+                        <p class="mt-4 text-gray-500 dark:text-gray-400 font-medium">正在处理中...</p>
+                    </div>
+                </div>
+
+                <!-- 结果区域 -->
+                <div id="result" class="hidden mt-6"></div>
+                
+                <!-- 错误区域 -->
+                <div id="error" class="hidden mt-6"></div>
+            </main>
+
+            <!-- 页脚 -->
+            <footer class="mt-8 text-center text-sm text-gray-400 dark:text-gray-500">
+                <p>Made with ❤️ for better proxy experience</p>
+            </footer>
+        </div>
+    </div>
+
+    <script>
+        let subscriptionCount = 0;
+
+        // 初始化
+        function init() {
+            addSubscription(true);
+        }
+
+
+
+        // Toast 通知
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            const colors = {
+                success: 'from-emerald-500 to-green-500',
+                error: 'from-red-500 to-rose-500',
+                info: 'from-primary-500 to-purple-500',
+                warning: 'from-amber-500 to-orange-500'
+            };
+            
+            const icons = {
+                success: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>',
+                error: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>',
+                info: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>',
+                warning: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>'
+            };
+            
+            toast.className = `flex items-center gap-3 px-4 py-3 rounded-xl bg-gradient-to-r ${colors[type]} text-white shadow-lg toast-enter min-w-72`;
+            toast.innerHTML = `
+                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">${icons[type]}</svg>
+                <span class="text-sm font-medium">${message}</span>
+            `;
+            
+            container.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.classList.add('toast-leave');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // 加载配置
+        async function loadConfig() {
+            const token = document.getElementById('token').value.trim();
+            
+            if (!token) {
+                showToast('请输入 Token', 'warning');
+                return;
+            }
+            
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('error').classList.add('hidden');
+            
+            try {
+                const response = await fetch(`/api/config/${token}`);
+                const data = await response.json();
+                
+                if (data.success && data.config) {
+                    document.getElementById('subscriptions-container').innerHTML = '';
+                    subscriptionCount = 0;
+                    
+                    const subscriptions = data.config.subscriptions || [];
+                    
+                    if (subscriptions.length === 0) {
+                        showToast('该 Token 没有保存的订阅配置', 'warning');
+                        init();
+                        return;
+                    }
+                    
+                    subscriptions.forEach((sub, index) => {
+                        addSubscription(sub.is_main);
+                        const item = document.getElementById(`subscription-${subscriptionCount}`);
+                        
+                        item.querySelector('.sub-name').value = sub.name || `订阅${index + 1}`;
+                        
+                        if (sub.file_md5 && !sub.url) {
+                            switchSource(subscriptionCount, 'file');
+                            const fileLabel = item.querySelector('.file-drop-zone');
+                            fileLabel.classList.add('has-file');
+                            fileLabel.innerHTML = `
+                                <svg class="w-8 h-8 text-emerald-500 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                </svg>
+                                <p class="text-sm font-medium text-emerald-600 dark:text-emerald-400">已保存的文件</p>
+                                <p class="text-xs text-gray-400 mt-1">MD5: ${sub.file_md5.substring(0, 8)}... 可重新上传覆盖</p>
+                            `;
+                            item.dataset.fileMd5 = sub.file_md5;
+                        } else {
+                            item.querySelector('.sub-url').value = sub.url || '';
+                        }
+                        
+                        // 设置 Toggle 状态
+                        if (sub.is_main) item.querySelector('.is-main-toggle').classList.add('active');
+                        if (sub.in_rules !== false) item.querySelector('.in-rules-toggle').classList.add('active');
+                        if (sub.enable_auto) item.querySelector('.enable-auto-toggle').classList.add('active');
+                        
+                        // 更新隐藏的 checkbox
+                        item.querySelector('.is-main').checked = sub.is_main || false;
+                        item.querySelector('.in-rules').checked = sub.in_rules !== false;
+                        item.querySelector('.enable-auto').checked = sub.enable_auto || false;
+                    });
+                    
+                    showToast('配置加载成功', 'success');
+                } else {
+                    showToast(data.error || '加载失败', 'error');
+                    if (!document.querySelector('.subscription-item')) {
+                        init();
+                    }
+                }
+            } catch (error) {
+                showToast('网络错误: ' + error.message, 'error');
+                if (!document.querySelector('.subscription-item')) {
+                    init();
+                }
+            } finally {
+                document.getElementById('loading').classList.add('hidden');
+            }
+        }
+
+        // 添加订阅
+        function addSubscription(isMain = false) {
+            subscriptionCount++;
+            const container = document.getElementById('subscriptions-container');
+            const subscriptionDiv = document.createElement('div');
+            subscriptionDiv.className = 'subscription-item bg-white/60 dark:bg-gray-800/60 rounded-2xl p-5 border border-gray-200/50 dark:border-gray-700/50 card-hover animate-slide-up';
+            subscriptionDiv.id = `subscription-${subscriptionCount}`;
+            
+            subscriptionDiv.innerHTML = `
+                <!-- 头部 -->
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-purple-500 flex items-center justify-center text-white font-bold shadow-lg shadow-primary-500/25">
+                            ${subscriptionCount}
+                        </div>
+                        <input 
+                            type="text" 
+                            class="sub-name font-medium text-gray-800 dark:text-gray-200 bg-transparent border-none outline-none focus:ring-0 w-32"
+                            value="订阅${subscriptionCount}"
+                            placeholder="订阅名称"
+                        >
+                    </div>
+                    ${subscriptionCount > 1 ? `
+                        <button 
+                            type="button" 
+                            onclick="removeSubscription(${subscriptionCount})"
+                            class="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
+                        >
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                            </svg>
+                        </button>
+                    ` : ''}
+                </div>
+                
+                <!-- 来源切换 -->
+                <div class="flex gap-2 mb-4 p-1 bg-gray-100 dark:bg-gray-700/50 rounded-xl">
+                    <button 
+                        type="button" 
+                        class="source-btn flex-1 py-2.5 px-4 rounded-lg text-sm font-medium transition-all active bg-white dark:bg-gray-600 text-gray-800 dark:text-gray-200 shadow-sm"
+                        onclick="switchSource(${subscriptionCount}, 'url')"
+                    >
+                        <span class="flex items-center justify-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                            </svg>
+                            远程链接
+                        </span>
+                    </button>
+                    <button 
+                        type="button" 
+                        class="source-btn flex-1 py-2.5 px-4 rounded-lg text-sm font-medium transition-all text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                        onclick="switchSource(${subscriptionCount}, 'file')"
+                    >
+                        <span class="flex items-center justify-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                            </svg>
+                            本地文件
+                        </span>
+                    </button>
+                </div>
+                
+                <!-- URL 输入 -->
+                <div class="url-input mb-4">
+                    <input 
+                        type="text" 
+                        class="sub-url w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 input-focus-ring focus:border-primary-500 dark:focus:border-primary-400 outline-none transition-all"
+                        placeholder="https://example.com/subscribe"
+                        required
+                    >
+                </div>
+                
+                <!-- 文件上传 -->
+                <div class="file-input hidden mb-4">
+                    <div class="file-input-wrapper">
+                        <input 
+                            type="file" 
+                            class="sub-file hidden" 
+                            id="file-${subscriptionCount}" 
+                            accept=".yaml,.yml,.txt" 
+                            onchange="handleFileSelect(${subscriptionCount})"
+                        >
+                        <label 
+                            for="file-${subscriptionCount}" 
+                            class="file-drop-zone block p-6 rounded-xl text-center cursor-pointer"
+                            id="file-label-${subscriptionCount}"
+                            ondragover="handleDragOver(event, ${subscriptionCount})"
+                            ondragleave="handleDragLeave(event, ${subscriptionCount})"
+                            ondrop="handleDrop(event, ${subscriptionCount})"
+                        >
+                            <svg class="w-10 h-10 mx-auto mb-3 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                            </svg>
+                            <p class="text-sm font-medium text-gray-600 dark:text-gray-300">点击上传或拖拽文件到此处</p>
+                            <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">支持 .yaml, .yml, .txt 格式</p>
+                        </label>
+                    </div>
+                </div>
+                
+                <!-- 选项区域 -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-gray-200/50 dark:border-gray-700/50">
+                    <!-- 主订阅 -->
+                    <div class="flex items-center justify-between p-3 rounded-xl bg-gray-50/50 dark:bg-gray-700/30">
+                        <div class="flex items-center gap-2">
+                            <svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/>
+                            </svg>
+                            <span class="text-xs font-medium text-gray-600 dark:text-gray-300">主订阅</span>
+                        </div>
+                        <div class="toggle-switch is-main-toggle ${isMain ? 'active' : ''}" onclick="toggleOption(${subscriptionCount}, 'is-main')"></div>
+                        <input type="checkbox" class="is-main hidden" ${isMain ? 'checked' : ''}>
+                    </div>
+                    
+                    <!-- 参与规则 -->
+                    <div class="flex items-center justify-between p-3 rounded-xl bg-gray-50/50 dark:bg-gray-700/30">
+                        <div class="flex items-center gap-2">
+                            <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
+                            </svg>
+                            <span class="text-xs font-medium text-gray-600 dark:text-gray-300">参与规则</span>
+                        </div>
+                        <div class="toggle-switch in-rules-toggle active" onclick="toggleOption(${subscriptionCount}, 'in-rules')"></div>
+                        <input type="checkbox" class="in-rules hidden" checked>
+                    </div>
+                    
+                    <!-- 自动选择 -->
+                    <div class="flex items-center justify-between p-3 rounded-xl bg-gray-50/50 dark:bg-gray-700/30">
+                        <div class="flex items-center gap-2">
+                            <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                            </svg>
+                            <span class="text-xs font-medium text-gray-600 dark:text-gray-300">自动选择</span>
+                        </div>
+                        <div class="toggle-switch enable-auto-toggle" onclick="toggleOption(${subscriptionCount}, 'enable-auto')"></div>
+                        <input type="checkbox" class="enable-auto hidden">
+                    </div>
+                </div>
+            `;
+            
+            container.appendChild(subscriptionDiv);
+        }
+
+        // 删除订阅
+        function removeSubscription(id) {
+            const element = document.getElementById(`subscription-${id}`);
+            if (element) {
+                element.style.animation = 'slideUp 0.3s ease-out reverse';
+                setTimeout(() => element.remove(), 280);
+            }
+        }
+
+        // 切换来源
+        function switchSource(id, source) {
+            const item = document.getElementById(`subscription-${id}`);
+            const urlInput = item.querySelector('.url-input');
+            const fileInput = item.querySelector('.file-input');
+            const sourceBtns = item.querySelectorAll('.source-btn');
+            const urlField = item.querySelector('.sub-url');
+            
+            sourceBtns.forEach(btn => {
+                btn.classList.remove('active', 'bg-white', 'dark:bg-gray-600', 'text-gray-800', 'dark:text-gray-200', 'shadow-sm');
+                btn.classList.add('text-gray-500', 'dark:text-gray-400');
+            });
+            
+            if (source === 'url') {
+                urlInput.classList.remove('hidden');
+                fileInput.classList.add('hidden');
+                sourceBtns[0].classList.add('active', 'bg-white', 'dark:bg-gray-600', 'text-gray-800', 'dark:text-gray-200', 'shadow-sm');
+                sourceBtns[0].classList.remove('text-gray-500', 'dark:text-gray-400');
+                urlField.required = true;
+            } else {
+                urlInput.classList.add('hidden');
+                fileInput.classList.remove('hidden');
+                sourceBtns[1].classList.add('active', 'bg-white', 'dark:bg-gray-600', 'text-gray-800', 'dark:text-gray-200', 'shadow-sm');
+                sourceBtns[1].classList.remove('text-gray-500', 'dark:text-gray-400');
+                urlField.required = false;
+            }
+        }
+
+        // 切换选项
+        function toggleOption(id, option) {
+            const item = document.getElementById(`subscription-${id}`);
+            const toggle = item.querySelector(`.${option}-toggle`);
+            const checkbox = item.querySelector(`.${option}`);
+            
+            toggle.classList.toggle('active');
+            checkbox.checked = toggle.classList.contains('active');
+            
+            // 主订阅互斥
+            if (option === 'is-main' && checkbox.checked) {
+                document.querySelectorAll('.subscription-item').forEach(sub => {
+                    if (sub.id !== `subscription-${id}`) {
+                        sub.querySelector('.is-main-toggle').classList.remove('active');
+                        sub.querySelector('.is-main').checked = false;
+                    }
+                });
+            }
+        }
+
+        // 处理文件选择
+        function handleFileSelect(id) {
+            const fileInput = document.getElementById(`file-${id}`);
+            const fileLabel = document.getElementById(`file-label-${id}`);
+            
+            if (fileInput.files.length > 0) {
+                const file = fileInput.files[0];
+                fileLabel.classList.add('has-file');
+                fileLabel.innerHTML = `
+                    <svg class="w-8 h-8 text-emerald-500 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <p class="text-sm font-medium text-emerald-600 dark:text-emerald-400">${file.name}</p>
+                    <p class="text-xs text-gray-400 mt-1">点击重新选择</p>
+                `;
+            }
+        }
+
+        // 拖拽事件
+        function handleDragOver(event, id) {
+            event.preventDefault();
+            document.getElementById(`file-label-${id}`).classList.add('dragover');
+        }
+
+        function handleDragLeave(event, id) {
+            event.preventDefault();
+            document.getElementById(`file-label-${id}`).classList.remove('dragover');
+        }
+
+        function handleDrop(event, id) {
+            event.preventDefault();
+            const fileLabel = document.getElementById(`file-label-${id}`);
+            fileLabel.classList.remove('dragover');
+            
+            const files = event.dataTransfer.files;
+            if (files.length > 0) {
+                const fileInput = document.getElementById(`file-${id}`);
+                fileInput.files = files;
+                handleFileSelect(id);
+            }
+        }
+
+        function handleMainChange(id) {
+            const allCheckboxes = document.querySelectorAll('.is-main');
+            allCheckboxes.forEach((checkbox, index) => {
+                if (checkbox.closest('.subscription-item').id !== `subscription-${id}`) {
+                    checkbox.checked = false;
+                }
+            });
+        }
+
+        // 收集订阅数据
+        function collectSubscriptions() {
+            const subscriptions = [];
+            const items = document.querySelectorAll('.subscription-item');
+            
+            items.forEach(item => {
+                const name = item.querySelector('.sub-name').value.trim();
+                const urlField = item.querySelector('.sub-url');
+                const isMain = item.querySelector('.is-main').checked;
+                const inRules = item.querySelector('.in-rules').checked;
+                const enableAuto = item.querySelector('.enable-auto').checked;
+                const fileInput = item.querySelector('.sub-file');
+                const savedFileMd5 = item.dataset.fileMd5 || '';
+                
+                const isFileMode = !item.querySelector('.file-input').classList.contains('hidden');
+                
+                if (name) {
+                    if (isFileMode) {
+                        if (fileInput.files.length > 0) {
+                            subscriptions.push({
+                                name: name,
+                                url: '',
+                                file: fileInput.files[0],
+                                file_md5: savedFileMd5,
+                                is_main: isMain,
+                                in_rules: inRules,
+                                enable_auto: enableAuto
+                            });
+                        } else if (savedFileMd5) {
+                            subscriptions.push({
+                                name: name,
+                                url: '',
+                                file: null,
+                                file_md5: savedFileMd5,
+                                is_main: isMain,
+                                in_rules: inRules,
+                                enable_auto: enableAuto
+                            });
+                        }
+                    } else {
+                        const url = urlField.value.trim();
+                        if (url) {
+                            subscriptions.push({
+                                name: name,
+                                url: url,
+                                file: null,
+                                file_md5: '',
+                                is_main: isMain,
+                                in_rules: inRules,
+                                enable_auto: enableAuto
+                            });
+                        }
+                    }
+                }
+            });
+            
+            return subscriptions;
+        }
+
+        // 表单提交
+        document.getElementById('mergeForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const subscriptions = collectSubscriptions();
+            const token = document.getElementById('token').value.trim();
+            
+            if (subscriptions.length === 0) {
+                showToast('请至少添加一个有效的订阅', 'warning');
+                return;
+            }
+            
+            const hasMain = subscriptions.some(s => s.is_main);
+            if (!hasMain) {
+                subscriptions[0].is_main = true;
+            }
+            
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('result').classList.add('hidden');
+            document.getElementById('error').classList.add('hidden');
+            
+            try {
+                const formData = new FormData();
+                if (token) {
+                    formData.append('token', token);
+                }
+                
+                subscriptions.forEach((sub, index) => {
+                    formData.append(`sub_name_${index}`, sub.name);
+                    formData.append(`sub_url_${index}`, sub.url);
+                    formData.append(`is_main_${index}`, sub.is_main);
+                    formData.append(`in_rules_${index}`, sub.in_rules);
+                    formData.append(`enable_auto_${index}`, sub.enable_auto);
+                    formData.append(`file_md5_${index}`, sub.file_md5 || '');
+                    
+                    if (sub.file) {
+                        formData.append(`sub_file_${index}`, sub.file);
+                    }
+                });
+                
+                const response = await fetch('/api/create', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    if (token) {
+                        showResult(data.subscribe_url || `${window.location.origin}/api/subscribe?token=${token}`, token, true);
+                    } else {
+                        showResult(data.subscribe_url, data.token, false);
+                    }
+                    showToast('订阅链接生成成功', 'success');
+                } else {
+                    showError(data.error || '生成失败');
+                }
+            } catch (error) {
+                showError('网络错误: ' + error.message);
+            } finally {
+                document.getElementById('loading').classList.add('hidden');
+            }
+        });
+        
+        // 显示结果
+        function showResult(subscribeUrl, token, isUpdate) {
+            const resultDiv = document.getElementById('result');
+            const title = isUpdate ? '配置更新成功' : '订阅链接生成成功';
+            const hint = isUpdate ? '配置已更新，订阅链接保持不变' : '请妥善保管 Token，下次可用于更新配置';
+            
+            resultDiv.innerHTML = `
+                <div class="p-5 rounded-2xl bg-gradient-to-r from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/20 border border-emerald-200/50 dark:border-emerald-700/50 animate-slide-up">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-green-500 flex items-center justify-center shadow-lg shadow-emerald-500/30">
+                            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                            </svg>
+                        </div>
+                        <h3 class="font-semibold text-gray-800 dark:text-gray-200">${title}</h3>
+                    </div>
+                    
+                    <div class="space-y-3">
+                        <div class="flex gap-2">
+                            <input 
+                                type="text" 
+                                class="flex-1 px-4 py-3 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300" 
+                                value="${subscribeUrl}" 
+                                readonly 
+                                id="subscribeUrl"
+                            >
+                            <button 
+                                type="button"
+                                onclick="copyToClipboard('subscribeUrl')"
+                                class="px-4 py-3 rounded-xl bg-gradient-to-r from-primary-500 to-purple-500 hover:from-primary-600 hover:to-purple-600 text-white font-medium shadow-lg shadow-primary-500/25 transition-all hover:-translate-y-0.5 flex items-center gap-2"
+                            >
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                                </svg>
+                                复制
+                            </button>
+                        </div>
+                        
+                        <div class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                            <svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
+                            </svg>
+                            <span><strong>Token:</strong> ${token}</span>
+                        </div>
+                        <p class="text-xs text-gray-400 dark:text-gray-500">${hint}</p>
+                    </div>
+                </div>
+            `;
+            resultDiv.classList.remove('hidden');
+            
+            if (!isUpdate) {
+                document.getElementById('token').value = token;
+            }
+        }
+        
+        function showSuccess(message) {
+            showToast(message, 'success');
+        }
+
+        function showError(message) {
+            showToast(message, 'error');
+            const errorDiv = document.getElementById('error');
+            errorDiv.innerHTML = `
+                <div class="p-4 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 animate-slide-up">
+                    <div class="flex items-center gap-3">
+                        <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        <span class="text-sm font-medium text-red-700 dark:text-red-400">${message}</span>
+                    </div>
+                </div>
+            `;
+            errorDiv.classList.remove('hidden');
+        }
+        
+        function copyToClipboard(elementId) {
+            const input = document.getElementById(elementId);
+            input.select();
+            document.execCommand('copy');
+            showToast('已复制到剪贴板', 'success');
+        }
+
+        // 初始化
+        init();
+    </script>
+</body>
+</html>

@@ -1,0 +1,113 @@
+# 订阅合成工具配置文件
+
+common:
+  # API 模式
+  api_mode: false
+  # 默认订阅链接（可选）
+  default_url: []
+  # 排除节点的关键词（支持正则）
+  exclude_remarks: 
+    - "过期"
+    - "剩余流量"
+    - "到期时间"
+    - "官网"
+  # 包含节点的关键词（支持正则）
+  include_remarks: []
+  # 缓存时间（秒）
+  cache_subscription: 300
+  cache_config: 300
+
+# 节点偏好设置
+node_pref:
+  # UDP 支持
+  udp_flag: false
+  # TCP Fast Open
+  tcp_fast_open_flag: false
+  # 跳过证书验证
+  skip_cert_verify_flag: false
+  # 节点排序
+  sort_flag: false
+  # 过滤不支持的节点
+  filter_deprecated_nodes: true
+  # 重命名规则（支持正则）- 留空表示不重命名
+  rename_node: []
+
+# Emoji 设置
+emojis:
+  # 是否添加 emoji
+  add_emoji: false
+  # 是否移除旧 emoji
+  remove_old_emoji: false
+  # Emoji 规则
+  rules:
+    - match: "(流量|时间|应急)"
+      emoji: "⌛"
+    - match: "(美|美国|United States)"
+      emoji: "🇺🇸"
+    - match: "(港|香港|HK|Hong Kong)"
+      emoji: "🇭🇰"
+    - match: "(日|日本|川日|东京|大阪|泉日|埼玉|沪日|深日|JP|Japan)"
+      emoji: "🇯🇵"
+    - match: "(台|台湾|TW|Taiwan)"
+      emoji: "🇹🇼"
+    - match: "(韩|韩国|首尔|KR|Korea)"
+      emoji: "🇰🇷"
+    - match: "(新|新加坡|狮城|SG|Singapore)"
+      emoji: "🇸🇬"
+    - match: "(英|英国|伦敦|UK|United Kingdom)"
+      emoji: "🇬🇧"
+    - match: "(德|德国|DE|Germany)"
+      emoji: "🇩🇪"
+    - match: "(法|法国|FR|France)"
+      emoji: "🇫🇷"
+    - match: "(俄|俄罗斯|RU|Russia)"
+      emoji: "🇷🇺"
+    - match: "(印|印度|IN|India)"
+      emoji: "🇮🇳"
+    - match: "(澳|澳大利亚|AU|Australia)"
+      emoji: "🇦🇺"
+    - match: "(加|加拿大|CA|Canada)"
+      emoji: "🇨🇦"
+
+# 代理组设置
+proxy_groups:
+  # 自定义代理组
+  custom_proxy_group:
+    - name: "🚀 节点选择"
+      type: "select"
+      rule: [".*"]
+    - name: "♻️ 自动选择"
+      type: "url-test"
+      rule: [".*"]
+      url: "http://www.gstatic.com/generate_204"
+      interval: 300
+      tolerance: 50
+    - name: "🎯 全球直连"
+      type: "select"
+      rule: ["DIRECT"]
+    - name: "🛑 全球拦截"
+      type: "select"
+      rule: ["REJECT"]
+
+# 规则集设置
+rulesets:
+  enabled: false
+  overwrite_original_rules: false
+  rulesets: []
+
+# 服务器设置
+server:
+  host: "0.0.0.0"
+  port: 5000
+  debug: true
+
+# 高级设置
+advanced:
+  # 日志级别
+  log_level: "info"
+  # 最大并发线程数
+  max_concurrent_threads: 4
+  # 启用缓存
+  enable_cache: true
+  # 请求超时（秒）
+  request_timeout: 30
