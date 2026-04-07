@@ -715,6 +715,7 @@ def merge_subscriptions(subscriptions):
                 'is_main': is_main,
                 'in_rules': sub_info.get('in_rules', True),
                 'enable_auto': sub_info.get('enable_auto', False),
+                'is_traffic_main': sub_info.get('is_traffic_main', False),
                 'userinfo': '', 'index': idx
             })
             userinfo_list.append({'name': sub_name, 'userinfo': '', 'is_local': True})
@@ -754,6 +755,7 @@ def merge_subscriptions(subscriptions):
                     'is_main': is_main,
                     'in_rules': sub_info.get('in_rules', True),
                     'enable_auto': sub_info.get('enable_auto', False),
+                    'is_traffic_main': sub_info.get('is_traffic_main', False),
                     'userinfo': userinfo, 'index': idx
                 })
                 if is_main:
@@ -1438,6 +1440,7 @@ def update_config(token):
                 is_main = request.form.get(f'is_main_{i}') == 'true'
                 in_rules = request.form.get(f'in_rules_{i}') == 'true'
                 enable_auto = request.form.get(f'enable_auto_{i}') == 'true'
+                is_traffic_main = request.form.get(f'traffic_main_{i}') == 'true'
                 old_file_md5 = request.form.get(f'file_md5_{i}', '').strip()  # 获取旧的 MD5
                 
                 # 检查是否有上传文件
@@ -1470,16 +1473,17 @@ def update_config(token):
                         'file_md5': file_md5,  # 保存文件的 MD5
                         'is_main': is_main,
                         'in_rules': in_rules,
-                        'enable_auto': enable_auto
+                        'enable_auto': enable_auto,
+                        'is_traffic_main': is_traffic_main
                     })
         else:
             # JSON格式
             data = request.get_json()
             subscriptions = data.get('subscriptions', [])
-        
+
         if not subscriptions:
             return jsonify({'error': '请提供订阅信息'}), 400
-        
+
         # 更新配置
         config_data = {
             'subscriptions': subscriptions,
@@ -1530,12 +1534,13 @@ def create_subscription():
                 is_main = request.form.get(f'is_main_{i}') == 'true'
                 in_rules = request.form.get(f'in_rules_{i}') == 'true'
                 enable_auto = request.form.get(f'enable_auto_{i}') == 'true'
-                
+                is_traffic_main = request.form.get(f'traffic_main_{i}') == 'true'
+
                 # 检查是否有上传文件
                 file_key = f'sub_file_{i}'
                 sub_content = ''
                 file_md5 = ''
-                
+
                 if file_key in request.files:
                     file = request.files[file_key]
                     if file and file.filename:
@@ -1543,7 +1548,7 @@ def create_subscription():
                         # 保存文件并获取 MD5
                         file_md5 = save_uploaded_file(sub_content)
                         log(f"   新建订阅文件: {sub_name}, MD5: {file_md5}")
-                
+
                 # URL和文件内容至少有一个
                 if sub_name and (sub_url or file_md5):
                     subscriptions.append({
@@ -1553,7 +1558,8 @@ def create_subscription():
                         'file_md5': file_md5,    # 保存 MD5 用于持久化
                         'is_main': is_main,
                         'in_rules': in_rules,
-                        'enable_auto': enable_auto
+                        'enable_auto': enable_auto,
+                        'is_traffic_main': is_traffic_main
                     })
         else:
             # JSON格式
@@ -1575,7 +1581,8 @@ def create_subscription():
                 'file_md5': sub.get('file_md5', ''),  # 保存文件的 MD5
                 'is_main': sub.get('is_main', False),
                 'in_rules': sub.get('in_rules', True),
-                'enable_auto': sub.get('enable_auto', False)
+                'enable_auto': sub.get('enable_auto', False),
+                'is_traffic_main': sub.get('is_traffic_main', False)
             }
             save_subscriptions_config.append(save_sub)
         
@@ -1635,8 +1642,12 @@ def subscribe_with_token():
         # 合并所有订阅的流量信息（优先使用主订阅的，如果没有则使用第一个）
         subscription_userinfo = ''
         if userinfo_list:
-            # 优先使用主订阅的流量信息
-            main_sub_name = subscriptions[0].get('name', '') if not any(s.get('is_main') for s in subscriptions) else next((s['name'] for s in subscriptions if s.get('is_main')), '')
+            # 优先使用指定流量信息的订阅，否则使用规则来源订阅
+            traffic_main_sub = next((s for s in subscriptions if s.get('is_traffic_main')), None)
+            if traffic_main_sub:
+                main_sub_name = traffic_main_sub.get('name', '')
+            else:
+                main_sub_name = subscriptions[0].get('name', '') if not any(s.get('is_main') for s in subscriptions) else next((s['name'] for s in subscriptions if s.get('is_main')), '')
             main_userinfo = next((info.get('userinfo', '') for info in userinfo_list if info.get('name') == main_sub_name and info.get('userinfo')), '')
             if main_userinfo:
                 subscription_userinfo = main_userinfo
