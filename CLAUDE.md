@@ -24,7 +24,7 @@ python -m unittest discover -s tests
 python -m unittest tests.test_v2_proxy_groups.V2FrozenRulesTest.test_supersub_first_and_rules_frozen
 ```
 
-Tests isolate storage by pointing `app.CONFIGS_DIR`, `FILES_DIR` and `CACHE_DIR` at a temp dir. They pass subscriptions in as uploaded YAML through `app.test_client()`, so no network is needed (see `setUp` in `tests/test_v2_proxy_groups.py`). Some assertions depend on the contents of `templates_storage/builtin_rules.json` and `templates_storage/v2_rules.json`.
+Tests isolate storage by pointing `app.CONFIGS_DIR`, `FILES_DIR` and `CACHE_DIR` at a temp dir. They pass subscriptions in as uploaded YAML through `app.test_client()`, so no network is needed (see `setUp` in `tests/test_v2_proxy_groups.py`). Some assertions depend on the contents of `templates_storage/default.json` and `templates_storage/v2_rules.json`.
 
 `static/tailwind.css` is a committed, minified build used only by `templates/index.html`. Rebuild it after changing Tailwind classes. Its inputs (`package.json`, `tailwind.config.js`, `tailwind-input.css`) are gitignored local files:
 
@@ -70,7 +70,7 @@ Add `?refresh=1` to a v2 URL to force a download. `subscription_cache/{md5(url)}
 
   Main-subscription groups whose names collide with these get a `_group` suffix, and their rules are rewritten to match.
 - `in_rules` controls whether a subscription's nodes are added to the main subscription's groups and to the injected business groups. Without it, they appear only in their own subscription group.
-- Final rules are the injected rule lists (TikTok, ads, video ads, academic, picky, download), followed by the main subscription's rules. Main-subscription rules whose target group doesn't exist are dropped. The injected lists are hardcoded inline, except the academic rules, which load from `templates_storage/builtin_rules.json`.
+- Final rules are the injected rule lists (TikTok, ads, video ads, academic, picky, download), followed by the main subscription's rules. Main-subscription rules whose target group doesn't exist are dropped. The injected lists are hardcoded inline, except the academic rules, which are the `🌏 学术网站` rules picked out of `templates_storage/default.json`.
 
 Content is parsed in this order in both `download_subscription` and `parse_local_subscription`: YAML → base64→YAML → base64→URI list → raw URI list. `parse_proxy_uri()` handles vless, vmess, ss, trojan and hysteria2/hy2. A new scheme has to be added there and to the scheme-detection lists in both parse functions.
 

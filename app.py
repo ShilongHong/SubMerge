@@ -810,21 +810,19 @@ V2_ACADEMIC_GROUP_NAME = '🌏 学术网站'
 
 
 def load_v2_academic_rules():
-    """加载历史内置学术网站规则，兼容旧版 default.json 和当前 builtin_rules.json。"""
-    for filename in ('templates_storage/builtin_rules.json', 'templates_storage/default.json'):
-        try:
-            with open(filename, 'r', encoding='utf-8') as handle:
-                data = json.load(handle)
-            rules = []
-            for rule in data.get('rules', []):
-                normalized = str(rule).strip()
-                if normalized.rsplit(',', 1)[-1].strip() == V2_ACADEMIC_GROUP_NAME:
-                    rules.append(normalized)
-            if rules:
-                return list(dict.fromkeys(rules))
-        except (OSError, ValueError, TypeError):
-            continue
-    return []
+    """从 templates_storage/default.json 加载历史内置学术网站规则。"""
+    try:
+        with open('templates_storage/default.json', 'r', encoding='utf-8') as handle:
+            data = json.load(handle)
+    except (OSError, ValueError) as e:
+        log(f"   ⚠️ 学术网站规则加载失败: {e}")
+        return []
+    rules = []
+    for rule in data.get('rules', []):
+        normalized = str(rule).strip()
+        if normalized.rsplit(',', 1)[-1].strip() == V2_ACADEMIC_GROUP_NAME:
+            rules.append(normalized)
+    return list(dict.fromkeys(rules))
 
 
 # V2 使用固化的规则模板：节点、参与规则、流量信息与 V1 相同，只替换代理组和规则。
@@ -1526,7 +1524,7 @@ def merge_subscriptions(subscriptions, prefer_cache=False):
         'DOMAIN-SUFFIX,usercontent.google.com,下载'
     ]
     
-    # 历史内置学术网站规则（来自 templates_storage/builtin_rules.json）
+    # 历史内置学术网站规则（来自 templates_storage/default.json）
     academic_rules = load_v2_academic_rules()
 
     # 挑剔的网站规则（Copilot、Cursor等）
