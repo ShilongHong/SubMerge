@@ -2,12 +2,14 @@ from flask import Flask, render_template, request, jsonify, Response
 import requests
 import yaml
 import base64
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 import hashlib
 import secrets
 import json
 import os
+import threading
+import time
 from werkzeug.utils import secure_filename
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -33,6 +35,15 @@ if not os.path.exists(FILES_DIR):
 CACHE_DIR = 'subscription_cache'
 if not os.path.exists(CACHE_DIR):
     os.makedirs(CACHE_DIR)
+
+# V2 使用 stale-while-revalidate：缓存优先返回，过期后后台刷新，避免客户端等待远程订阅。
+V2_CACHE_MAX_AGE = 15 * 60
+V2_CACHE_MAX_STALE_AGE = 14 * 24 * 60 * 60
+V2_CACHE_REFRESH_RETRY_INTERVAL = 5 * 60
+_cache_refresh_lock = threading.Lock()
+_cache_refreshing = set()
+_cache_refresh_last_started = {}
+_cache_refresh_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix='v2-cache')
 
 def get_file_md5(content):
     """计算内容的 MD5"""
@@ -61,6 +72,18 @@ def get_subscription_cache_key(url):
     """生成订阅缓存的键（使用URL的MD5）"""
     return hashlib.md5(url.encode('utf-8')).hexdigest()
 
+
+def safe_url_label(url):
+    """日志中只保留来源主机和短哈希，避免把订阅 token 写入日志。"""
+    try:
+        from urllib.parse import urlsplit
+        parsed = urlsplit(url)
+        host = parsed.netloc or parsed.path.split('/')[0]
+        digest = hashlib.sha256(url.encode('utf-8')).hexdigest()[:8]
+        return f'{parsed.scheme or "source"}://{host}…#{digest}'
+    except Exception:
+        return f'source#{hashlib.sha256(str(url).encode("utf-8")).hexdigest()[:8]}'
+
 def save_subscription_cache(url, content_dict, userinfo=''):
     """保存订阅到本地缓存"""
     try:
@@ -71,12 +94,14 @@ def save_subscription_cache(url, content_dict, userinfo=''):
             'url': url,
             'content': content_dict,
             'userinfo': userinfo,
-            'cached_at': datetime.now().isoformat(),
-            'cached_timestamp': datetime.now().timestamp()
+            'cached_at': datetime.now(timezone.utc).isoformat(),
+            'cached_timestamp': datetime.now(timezone.utc).timestamp()
         }
         
-        with open(cache_file, 'w', encoding='utf-8') as f:
+        temp_file = f"{cache_file}.{os.getpid()}.{threading.get_ident()}.tmp"
+        with open(temp_file, 'w', encoding='utf-8') as f:
             json.dump(cache_data, f, ensure_ascii=False, indent=2)
+        os.replace(temp_file, cache_file)
         
         log(f"   ✅ 订阅已缓存到本地: {cache_file}")
         return True
@@ -103,6 +128,79 @@ def load_subscription_cache(url):
     except Exception as e:
         log(f"   ⚠️ 缓存加载失败: {e}")
         return None, None
+
+
+def load_subscription_cache_metadata(url):
+    """读取缓存内容及时间戳，供 V2 判断是否需要后台刷新。"""
+    try:
+        cache_key = get_subscription_cache_key(url)
+        cache_file = os.path.join(CACHE_DIR, f"{cache_key}.json")
+        if not os.path.exists(cache_file):
+            return None, None, 0
+        with open(cache_file, 'r', encoding='utf-8') as f:
+            cache_data = json.load(f)
+        return (
+            cache_data.get('content'),
+            cache_data.get('userinfo', ''),
+            float(cache_data.get('cached_timestamp') or 0)
+        )
+    except Exception as e:
+        log(f"   ⚠️ 缓存元数据读取失败: {e}")
+        return None, None, 0
+
+
+def get_access_window_error(config):
+    """返回访问窗口错误；没有配置窗口时返回 None，兼容旧 token。"""
+    try:
+        minutes = int(config.get('access_window_minutes', 0) or 0)
+    except (TypeError, ValueError):
+        minutes = 0
+    if minutes <= 0:
+        return None
+
+    raw_timestamp = config.get('last_updated') or config.get('updated_at') or config.get('created_at')
+    if not raw_timestamp:
+        return None
+    try:
+        timestamp = datetime.fromisoformat(str(raw_timestamp).replace('Z', '+00:00'))
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        elapsed_seconds = (datetime.now(timezone.utc) - timestamp.astimezone(timezone.utc)).total_seconds()
+        if elapsed_seconds > minutes * 60:
+            return f'订阅访问窗口已过期（{minutes} 分钟）'
+    except (TypeError, ValueError, OverflowError) as e:
+        log(f"⚠️ 访问窗口时间解析失败: {e}")
+    return None
+
+
+def refresh_v2_cache_async(url):
+    """后台刷新单个订阅缓存，避免同一订阅被多个请求重复刷新。"""
+    now = time.time()
+    with _cache_refresh_lock:
+        if url in _cache_refreshing:
+            return False
+        if now - _cache_refresh_last_started.get(url, 0) < V2_CACHE_REFRESH_RETRY_INTERVAL:
+            return False
+        _cache_refreshing.add(url)
+        _cache_refresh_last_started[url] = now
+
+    def worker():
+        try:
+            log(f"   🔄 V2 后台刷新订阅: {safe_url_label(url)}")
+            download_subscription(url, use_cache=True, prefer_cache=False)
+        except Exception as e:
+            log(f"   ⚠️ V2 后台刷新失败: {e}")
+        finally:
+            with _cache_refresh_lock:
+                _cache_refreshing.discard(url)
+
+    try:
+        _cache_refresh_executor.submit(worker)
+    except Exception:
+        with _cache_refresh_lock:
+            _cache_refreshing.discard(url)
+        return False
+    return True
 
 def parse_traffic_info(userinfo):
     """
@@ -151,7 +249,7 @@ def parse_traffic_info(userinfo):
         if expire_str_raw and expire_str_raw != '':
             expire = safe_int(expire_str_raw)
             if expire > 0:
-                expire_date = datetime.fromtimestamp(expire)
+                expire_date = datetime.fromtimestamp(expire, tz=timezone.utc)
                 expire_str = expire_date.strftime('%Y-%m-%d')
             else:
                 expire_str = '永久'
@@ -184,8 +282,12 @@ def save_config(token, config):
     """保存指定token的配置"""
     config_file = get_config_file_path(token)
     try:
-        with open(config_file, 'w', encoding='utf-8') as f:
+        temp_file = f"{config_file}.{os.getpid()}.{threading.get_ident()}.tmp"
+        with open(temp_file, 'w', encoding='utf-8') as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_file, config_file)
         return True
     except Exception as e:
         log(f"保存配置失败: {e}")
@@ -531,8 +633,22 @@ def clean_yaml_text(text):
     return control_pattern.sub('', text)
 
 
-def download_subscription(url, use_cache=True):
+def download_subscription(url, use_cache=True, prefer_cache=False):
     """下载订阅内容，返回 (content, userinfo)"""
+    if prefer_cache and use_cache:
+        cached_content, cached_userinfo, cached_timestamp = load_subscription_cache_metadata(url)
+        if cached_content:
+            cache_age = max(0, time.time() - cached_timestamp) if cached_timestamp else V2_CACHE_MAX_AGE + 1
+            if cache_age <= V2_CACHE_MAX_AGE:
+                log(f"   📦 V2 使用新鲜缓存（{int(cache_age)} 秒前）")
+                return cached_content, cached_userinfo
+            if cache_age <= V2_CACHE_MAX_STALE_AGE:
+                refresh_started = refresh_v2_cache_async(url)
+                state = '已启动后台刷新' if refresh_started else '等待刷新冷却'
+                log(f"   📦 V2 使用过期缓存，{state}（{int(cache_age)} 秒前）")
+                return cached_content, cached_userinfo
+            log(f"   ⚠️ V2 缓存过期超过上限（{int(cache_age)} 秒），尝试同步刷新")
+
     headers = {
         'User-Agent': 'clash-verge/v2.4.6',
         'Accept': '*/*',
@@ -541,7 +657,7 @@ def download_subscription(url, use_cache=True):
     }
 
     try:
-        log(f"下载订阅: {url[:60]}...")
+        log(f"下载订阅: {safe_url_label(url)}")
         response = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
         response.raise_for_status()
 
@@ -613,7 +729,7 @@ def download_subscription(url, use_cache=True):
         return None, userinfo
 
     except requests.exceptions.HTTPError as e:
-        status_code = e.response.status_code if e.response else 'Unknown'
+        status_code = e.response.status_code if e.response is not None else 'Unknown'
         log(f"[ERROR] HTTP {status_code}")
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
         log(f"[ERROR] network: {e}")
@@ -624,7 +740,10 @@ def download_subscription(url, use_cache=True):
         log("   trying cache...")
         cached_content, cached_userinfo = load_subscription_cache(url)
         if cached_content:
-            log("[OK] cache hit")
+            # 走到这里说明在线下载已失败。此时有任何本地缓存都应兜底返回，
+            # 否则订阅源临时失效（如 401/超时）会让主订阅直接报错、整个订阅 500。
+            # 缓存新旧已由上方 prefer_cache 的主动刷新路径控制，兜底不再因过期上限拒绝。
+            log("[OK] cache hit (fallback)")
             return cached_content, cached_userinfo
         log("   no cache")
 
@@ -643,6 +762,7 @@ def parse_local_subscription(content):
         if config and isinstance(config, dict) and ('proxies' in config or 'proxy-groups' in config):
             log(f"   ✅ 本地内容解析成功（YAML格式）")
             return config
+
     except Exception as e:
         log(f"   本地 YAML 解析失败: {e}")
     
@@ -685,7 +805,122 @@ def parse_local_subscription(content):
     log(f"   ❌ 本地内容无法解析，前100字符: {content[:100]}")
     return None
 
-def merge_subscriptions(subscriptions):
+
+V2_ACADEMIC_GROUP_NAME = '🌏 学术网站'
+
+
+def load_v2_academic_rules():
+    """加载历史内置学术网站规则，兼容旧版 default.json 和当前 builtin_rules.json。"""
+    for filename in ('templates_storage/builtin_rules.json', 'templates_storage/default.json'):
+        try:
+            with open(filename, 'r', encoding='utf-8') as handle:
+                data = json.load(handle)
+            rules = []
+            for rule in data.get('rules', []):
+                normalized = str(rule).strip()
+                if normalized.rsplit(',', 1)[-1].strip() == V2_ACADEMIC_GROUP_NAME:
+                    rules.append(normalized)
+            if rules:
+                return list(dict.fromkeys(rules))
+        except (OSError, ValueError, TypeError):
+            continue
+    return []
+
+
+# V2 使用固化的规则模板：节点、参与规则、流量信息与 V1 相同，只替换代理组和规则。
+V2_TEMPLATE_PATH = 'templates_storage/v2_rules.json'
+V2_RULE_EXTRA_PARAMS = {'no-resolve', 'extended-match', 'src'}
+# 每个规则组都提供的内置策略。PASS（跳过本条规则继续匹配）只有 mihomo 内核支持，
+# 旧版 Clash 内核遇到未知策略会拒绝整份配置，因此只对已知的 mihomo 系客户端加入。
+V2_BUILTIN_POLICIES = ['DIRECT', 'REJECT']
+V2_PASS_POLICY = 'PASS'
+V2_PASS_UA_KEYWORDS = ('mihomo', 'meta', 'verge', 'nyanpasu', 'flclash', 'clash-party', 'clashparty')
+
+
+def v2_client_supports_pass(user_agent):
+    """按 User-Agent 判断客户端是否为 mihomo 内核；未知客户端按不支持处理。"""
+    ua = str(user_agent or '').lower()
+    return any(keyword in ua for keyword in V2_PASS_UA_KEYWORDS)
+_v2_template_cache = {'mtime': None, 'data': None}
+
+
+def load_v2_template():
+    """读取 V2 固化规则模板，文件未变化时复用内存中的结果。"""
+    mtime = os.path.getmtime(V2_TEMPLATE_PATH)
+    if _v2_template_cache['mtime'] != mtime:
+        with open(V2_TEMPLATE_PATH, 'r', encoding='utf-8') as handle:
+            _v2_template_cache['data'] = json.load(handle)
+        _v2_template_cache['mtime'] = mtime
+    return _v2_template_cache['data']
+
+
+def v2_rule_target(rule):
+    """返回规则的目标代理组（跳过 no-resolve 等尾部参数）。"""
+    parts = [part.strip() for part in str(rule).split(',')]
+    index = len(parts) - 1
+    while index > 0 and parts[index].lower() in V2_RULE_EXTRA_PARAMS:
+        index -= 1
+    return parts[index]
+
+
+def build_v2_config(merged_config, subscriptions, allow_pass=False):
+    """在 V1 合并结果上套用固化规则：SuperSub 置顶并包含全部节点，业务组默认选择 SuperSub。"""
+    template = load_v2_template()
+    policies = V2_BUILTIN_POLICIES + ([V2_PASS_POLICY] if allow_pass else [])
+    super_name = template.get('super_group', 'SuperSub')
+    v1_groups = {group.get('name'): group for group in merged_config.get('proxy-groups', [])}
+
+    # 订阅组、Auto 组和节点信息组沿用 V1；Auto 组只在 V1 为该订阅生成时存在。
+    sub_names = [s.get('name') for s in subscriptions if s.get('name') in v1_groups]
+    auto_names = [f'{name}_Auto' for name in sub_names if f'{name}_Auto' in v1_groups]
+    info_group = v1_groups.get('节点信息')
+    info_names = set(info_group.get('proxies', [])) if info_group else set()
+
+    all_nodes = [p['name'] for p in merged_config.get('proxies', [])
+                 if p.get('name') and p['name'] not in info_names]
+    # 参与规则的节点与 V1 一致：只取 in_rules 订阅组里的节点。
+    rule_nodes = []
+    for sub in subscriptions:
+        name = sub.get('name')
+        if name in sub_names and sub.get('in_rules', True):
+            rule_nodes.extend(ref for ref in v1_groups[name].get('proxies', [])
+                              if ref not in auto_names and ref != 'DIRECT')
+
+    reserved = set(sub_names) | set(auto_names) | {super_name, '节点信息'}
+    template_groups = []
+    for group in template.get('proxy_groups', []):
+        if group['name'] in reserved:
+            log(f"   ⚠️ V2 模板组与订阅组重名，沿用订阅组: {group['name']}")
+            continue
+        template_groups.append(group)
+    valid_refs = set(policies) | reserved | {g['name'] for g in template_groups}
+    # 规则组按模板中的顺序输出：常调整的代理类组在前，直连/拦截类组在后。
+    template_rules = template.get('rules', [])
+
+    # SuperSub 先列各订阅组和 Auto 组供整组切换，再列全部节点；默认选中第一个订阅组。
+    super_group = {'name': super_name, 'type': 'select',
+                   'proxies': sub_names + auto_names + all_nodes or ['DIRECT']}
+    groups = [super_group] + [v1_groups[name] for name in sub_names + auto_names]
+    if info_group:
+        groups.append(info_group)
+    # 每个规则组：模板指定的默认项在前，然后是 SuperSub、内置策略、订阅组、Auto 组和参与规则的节点。
+    common_refs = [super_name] + policies + sub_names + auto_names + rule_nodes
+    for group in template_groups:
+        refs = [ref for ref in group.get('proxies', []) if ref in valid_refs] + common_refs
+        groups.append({
+            'name': group['name'],
+            'type': group.get('type', 'select'),
+            'proxies': list(dict.fromkeys(refs)) or ['DIRECT'],
+        })
+    merged_config['proxy-groups'] = groups
+
+    group_names = {group['name'] for group in groups} | set(policies)
+    merged_config['rules'] = [rule for rule in template_rules
+                              if v2_rule_target(rule) in group_names]
+    return merged_config
+
+
+def merge_subscriptions(subscriptions, prefer_cache=False):
     """
     合并多个订阅
     subscriptions: [{'url': '...', 'name': '订阅1', 'is_main': True, 'in_rules': True}, ...]
@@ -729,7 +964,9 @@ def merge_subscriptions(subscriptions):
     if remote_subs:
         def _download_one(args):
             idx, sub_info = args
-            return idx, sub_info, download_subscription(sub_info['url'])
+            return idx, sub_info, download_subscription(
+                sub_info['url'], prefer_cache=prefer_cache
+            )
 
         log(f"并行下载 {len(remote_subs)} 个远程订阅...")
         with ThreadPoolExecutor(max_workers=min(len(remote_subs), 4)) as executor:
@@ -767,6 +1004,8 @@ def merge_subscriptions(subscriptions):
 
     # 按 subscriptions 原始顺序排序 downloaded_subs，确保与用户配置一致
     downloaded_subs.sort(key=lambda x: x['index'])
+    subscription_order = {sub.get('name'): index for index, sub in enumerate(subscriptions)}
+    userinfo_list.sort(key=lambda info: (subscription_order.get(info.get('name'), len(subscriptions)), info.get('name', '')))
 
     # 从 downloaded_subs 中正确找到主订阅
     if main_sub:
@@ -789,7 +1028,103 @@ def merge_subscriptions(subscriptions):
         'mode': main_sub.get('mode', 'Rule'),
         'log-level': main_sub.get('log-level', 'info'),
         'external-controller': main_sub.get('external-controller', '127.0.0.1:9090'),
-        'dns': main_sub.get('dns', {}),
+        
+        
+    #     'dns': main_sub.get('dns', {}),
+    # }
+    
+        # DNS 固定使用默认配置，不读取主订阅
+        'dns': {
+            'enable': True,
+            'listen': '0.0.0.0:1053',
+
+            'ipv6': False,
+
+            'enhanced-mode': 'fake-ip',
+            'fake-ip-range': '198.18.0.1/16',
+
+            'use-hosts': True,
+            'use-system-hosts': True,
+
+            # 临时关闭，用于排查
+            'respect-rules': False,
+            'prefer-h3': False,
+
+            'default-nameserver': [
+                '223.5.5.5',
+                '119.29.29.29',
+            ],
+
+            'proxy-server-nameserver': [
+                '223.5.5.5',
+                '119.29.29.29',
+            ],
+
+            # 临时也使用最简单的 DNS
+            'nameserver': [
+                '223.5.5.5',
+                '119.29.29.29',
+            ],
+
+            # 系统联网检测、局域网等特殊域名使用国内 DNS
+            'nameserver-policy': {
+                '+.captive.apple.com,+.msftconnecttest.com,+.connect.rom.miui.com,+.connectivitycheck.gstatic.com,+.connectivitycheck.platform.hicloud.com': [
+                    '119.29.29.29',
+                    '223.5.5.5',
+                    '114.114.114.114',
+                ],
+
+                'geosite:private': [
+                    '119.29.29.29',
+                    '223.5.5.5',
+                    '114.114.114.114',
+                ],
+            },
+
+            'fake-ip-filter': [
+                '*.lan',
+                '*.localdomain',
+                '*.invalid',
+                '*.localhost',
+                '*.test',
+                '*.local',
+                '*.home.arpa',
+
+                # Windows 网络检测
+                '+.msftncsi.com',
+                '+.msftconnecttest.com',
+                'www.msftconnecttest.com',
+
+                # macOS / iOS 网络检测
+                'captive.apple.com',
+
+                # Android / 手机网络检测
+                'connect.rom.miui.com',
+                'wifi.vivo.com.cn',
+                'connectivitycheck.platform.hicloud.com',
+
+                # 时间同步
+                '*.time.edu.cn',
+                '*.ntp.org.cn',
+                '+.pool.ntp.org',
+
+                # 国内服务兼容
+                '+.bilivideo.com',
+                '+.douyinvod.com',
+                '+.feishu.cn',
+                '+.dingtalk.com',
+                '+.chat.bilibili.com',
+
+                # STUN
+                'stun.*.*',
+                'stun.*.*.*',
+
+                # 原配置中的特殊规则
+                '+.definition-meaning.top',
+                '+.sfr-bouygues.cloud',
+                '+.portail-offres.top',
+            ],
+        },
     }
     
     # 复制主订阅的其他配置
@@ -1016,6 +1351,25 @@ def merge_subscriptions(subscriptions):
         'proxies': ['REJECT', 'DIRECT']  # 默认拒绝，也可以选择直连
     }
     proxy_groups.append(common_ad_group)
+
+    # 添加统一的 BLOCK 代理组，保留给规则和用户手动切换使用。
+    block_group = {
+        'name': 'BLOCK',
+        'type': 'select',
+        'proxies': ['REJECT', 'DIRECT']
+    }
+    proxy_groups.append(block_group)
+
+    # 恢复历史内置学术网站代理组，使内置学术规则在 V1/V2 中也有有效目标。
+    academic_group = {
+        'name': '🌏 学术网站',
+        'type': 'select',
+        'proxies': ['DIRECT']
+    }
+    for group_name in new_group_names + auto_group_names + rule_proxy_names:
+        if group_name not in academic_group['proxies']:
+            academic_group['proxies'].append(group_name)
+    proxy_groups.append(academic_group)
     
     # 处理主订阅的代理组，将新增的代理组添加到每个代理组中
     original_groups = main_sub.get('proxy-groups', [])
@@ -1172,9 +1526,11 @@ def merge_subscriptions(subscriptions):
         'DOMAIN-SUFFIX,usercontent.google.com,下载'
     ]
     
-    # 挑剔的网站规则（Google Scholar、Copilot、Cursor等）
+    # 历史内置学术网站规则（来自 templates_storage/builtin_rules.json）
+    academic_rules = load_v2_academic_rules()
+
+    # 挑剔的网站规则（Copilot、Cursor等）
     picky_site_rules = [
-        'DOMAIN-SUFFIX,scholar.google.com,挑剔的网站',
         'DOMAIN-KEYWORD,copilot,挑剔的网站',
         'DOMAIN-SUFFIX,aicursor.com,挑剔的网站',
         'DOMAIN-SUFFIX,cursor.sh,挑剔的网站',
@@ -1339,15 +1695,20 @@ def merge_subscriptions(subscriptions):
         else:
             valid_rules.append(rule)  # 保留格式不对的规则
     
-    # 合并规则：TikTok解锁 + 常见广告域名 + 屏蔽视频广告 + 挑剔的网站规则在最前 + 下载规则 + 有效的原有规则
-    merged_config['rules'] = tiktok_unlock_rules + common_ad_rules + video_ad_block_rules + picky_site_rules + download_rules + valid_rules
+    # 合并规则：学术网站规则要早于下载规则，避免 arxiv.org 等被下载规则先匹配。
+    merged_config['rules'] = (
+        tiktok_unlock_rules + common_ad_rules + video_ad_block_rules +
+        academic_rules + picky_site_rules + download_rules + valid_rules
+    )
     
     return merged_config, None, userinfo_list
+
 
 @app.route('/')
 def index():
     """首页"""
     return render_template('index.html')
+
 
 @app.route('/merge', methods=['POST'])
 def merge():
@@ -1483,18 +1844,24 @@ def update_config(token):
         if not subscriptions:
             return jsonify({'error': '请提供订阅信息'}), 400
 
-        # 更新配置
-        config_data = {
+        # 更新配置：保留旧 schema 字段（自定义规则、访问窗口等），避免只改订阅时静默丢失。
+        now = datetime.now(timezone.utc).isoformat()
+        config_data = dict(existing_config)
+        config_data.update({
             'subscriptions': subscriptions,
-            'updated_at': datetime.now().isoformat(),
-            'created_at': existing_config.get('created_at', datetime.now().isoformat())
-        }
-        save_config(token, config_data)
+            'updated_at': now,
+            'last_updated': now,
+            'created_at': existing_config.get('created_at', now)
+        })
+        if not save_config(token, config_data):
+            return jsonify({'error': '配置保存失败'}), 500
         
         return jsonify({
             'success': True,
             'message': '配置更新成功',
-            'token': token
+            'token': token,
+            'subscribe_url': f"{request.host_url}api/subscribe?token={token}",
+            'subscribe_url_v2': f"{request.host_url}api/subscribe/v2?token={token}"
         })
     except Exception as e:
         return jsonify({'error': f'更新失败: {str(e)}'}), 500
@@ -1585,11 +1952,14 @@ def create_subscription():
             }
             save_subscriptions_config.append(save_sub)
         
+        now = datetime.now(timezone.utc).isoformat()
         config_data = {
             'subscriptions': save_subscriptions_config,
-            'created_at': datetime.now().isoformat()
+            'created_at': now,
+            'last_updated': now
         }
-        save_config(token, config_data)
+        if not save_config(token, config_data):
+            return jsonify({'error': '配置保存失败'}), 500
         
         # 生成订阅链接
         subscribe_url = f"{request.host_url}api/subscribe?token={token}"
@@ -1597,7 +1967,8 @@ def create_subscription():
         return jsonify({
             'success': True,
             'token': token,
-            'subscribe_url': subscribe_url
+            'subscribe_url': subscribe_url,
+            'subscribe_url_v2': f"{request.host_url}api/subscribe/v2?token={token}"
         })
     except Exception as e:
         return jsonify({'error': f'创建失败: {str(e)}'}), 500
@@ -1615,6 +1986,9 @@ def subscribe_with_token():
     config = load_config(token)
     if not config:
         return Response('无效的Token', status=403)
+    access_error = get_access_window_error(config)
+    if access_error:
+        return Response(access_error, status=403)
     subscriptions = config['subscriptions']
     
     # 对于有 file_md5 的订阅，从本地文件加载内容
@@ -1668,7 +2042,7 @@ def subscribe_with_token():
         log(f"✅ YAML 生成成功，长度: {len(yaml_content)}")
         
         response_headers = {
-            'Content-Disposition': f'attachment; filename=clash_config_{datetime.now().strftime("%Y%m%d_%H%M%S")}.yaml',
+            'Content-Disposition': f'attachment; filename=clash_config_{datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")}.yaml',
         }
         if subscription_userinfo:
             response_headers['subscription-userinfo'] = subscription_userinfo
@@ -1683,7 +2057,76 @@ def subscribe_with_token():
         error_detail = traceback.format_exc()
         log(f"❌ 订阅处理异常: {e}")
         log(error_detail)
-        return Response(f'生成配置失败: {str(e)}\n\n详细错误:\n{error_detail}', status=500)
+        error_id = secrets.token_hex(4)
+        return Response(f'生成配置失败，请稍后重试（错误编号: {error_id}）', status=500)
+
+
+@app.route('/api/subscribe/v2')
+def subscribe_with_token_v2():
+    """V2 订阅：V1 的节点与参与规则 + 固化规则模板（SuperSub 置顶）；旧路径保持不变。"""
+    ua = request.headers.get('User-Agent', 'unknown')
+    log(f"[V2 Client UA] {ua}")
+    token = request.args.get('token', '')
+    if not token:
+        return Response('缺少token参数', status=400)
+
+    config = load_config(token)
+    if not config:
+        return Response('无效的Token', status=403)
+    access_error = get_access_window_error(config)
+    if access_error:
+        return Response(access_error, status=403)
+    subscriptions = config.get('subscriptions', [])
+    force_refresh = request.args.get('refresh', '').lower() in {'1', 'true', 'yes'}
+
+    for sub in subscriptions:
+        file_md5 = sub.get('file_md5', '')
+        if file_md5 and not sub.get('content'):
+            content = load_uploaded_file(file_md5)
+            if content:
+                sub['content'] = content
+
+    try:
+        merged_config, error, userinfo_list = merge_subscriptions(
+            subscriptions, prefer_cache=not force_refresh
+        )
+        if error:
+            return Response(f'错误: {error}', status=500)
+        allow_pass = v2_client_supports_pass(ua)
+        merged_config = build_v2_config(merged_config, subscriptions, allow_pass=allow_pass)
+
+        subscription_userinfo = ''
+        if userinfo_list:
+            traffic_main_sub = next((s for s in subscriptions if s.get('is_traffic_main')), None)
+            if traffic_main_sub:
+                traffic_name = traffic_main_sub.get('name', '')
+            else:
+                traffic_name = next((s['name'] for s in subscriptions if s.get('is_main')), subscriptions[0].get('name', ''))
+            subscription_userinfo = next(
+                (info.get('userinfo', '') for info in userinfo_list
+                 if info.get('name') == traffic_name and info.get('userinfo')), ''
+            )
+            if not subscription_userinfo:
+                subscription_userinfo = next(
+                    (info.get('userinfo', '') for info in userinfo_list if info.get('userinfo')), ''
+                )
+
+        yaml_content = yaml.dump(merged_config, allow_unicode=True)
+        response_headers = {
+            'Content-Disposition': f'attachment; filename=clash_config_v2_{datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")}.yaml',
+        }
+        if subscription_userinfo:
+            response_headers['subscription-userinfo'] = subscription_userinfo
+        log(f"✅ V2 合并完成，共 {len(merged_config.get('proxies', []))} 个节点，PASS={'开' if allow_pass else '关'}，YAML {len(yaml_content)} 字节")
+        return Response(yaml_content, mimetype='text/yaml', headers=response_headers)
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        log(f"❌ V2 订阅处理异常: {e}")
+        log(error_detail)
+        error_id = secrets.token_hex(4)
+        return Response(f'生成V2配置失败，请稍后重试（错误编号: {error_id}）', status=500)
+
 
 @app.route('/subscribe')
 def subscribe():
@@ -1729,7 +2172,7 @@ def subscribe():
     try:
         yaml_content = yaml.dump(merged_config, allow_unicode=True)
         response_headers = {
-            'Content-Disposition': f'attachment; filename=clash_config_{datetime.now().strftime("%Y%m%d_%H%M%S")}.yaml',
+            'Content-Disposition': f'attachment; filename=clash_config_{datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")}.yaml',
         }
         if subscription_userinfo:
             response_headers['subscription-userinfo'] = subscription_userinfo
@@ -1743,4 +2186,11 @@ def subscribe():
         return Response(f'生成配置失败: {str(e)}', status=500)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    debug = os.getenv('SUBMERGE_DEBUG', '').lower() in {'1', 'true', 'yes'}
+    use_reloader = os.getenv('SUBMERGE_RELOAD', '1').lower() in {'1', 'true', 'yes'}
+    app.run(
+        host=os.getenv('SUBMERGE_HOST', '0.0.0.0'),
+        port=int(os.getenv('SUBMERGE_PORT', '5000')),
+        debug=debug,
+        use_reloader=use_reloader
+    )

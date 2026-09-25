@@ -67,6 +67,23 @@ pyinstaller build.spec
 - ✅ **智能合并** - 主订阅提供规则，其他订阅提供节点
 - ✅ **节点分组** - 自动创建ALL组、订阅组、其他节点组
 - ✅ **规则控制** - 可选择订阅是否参与规则代理组
+- ✅ **V2 固定规则** - 同一份节点套用固化规则模板，SuperSub 置顶
+
+## 🧭 V2 固定规则订阅
+
+```text
+GET /api/subscribe/v2?token=<token>
+```
+
+V2 的节点、参与规则、自动选择和流量信息与 V1 完全相同，只有代理组和规则不同：
+
+- 规则固定使用 `templates_storage/v2_rules.json`，不再跟随主订阅变化。
+- 最上面是 `SuperSub`：先列各订阅组和 Auto 组（可整组切换，默认选第一个订阅组），再列所有订阅的全部节点（不含流量信息节点）。
+- 规则组名称统一以 emoji 开头，按常用程度固定排序：常调整的代理类组（AI、国外媒体、电报、谷歌……）在前，🐟 漏网之鱼 之后是直连/拦截类组。顺序即 `v2_rules.json` 中 `proxy_groups` 的顺序。
+- 每个规则组都包含 `SuperSub`、DIRECT、REJECT、各订阅组、Auto 组和参与规则的节点，默认选择 `SuperSub`。
+- PASS 只对 mihomo 系客户端加入（按 User-Agent 识别：Clash Verge、Clash Meta、mihomo party、FlClash、Nyanpasu），其他客户端不加。
+- 例外：`🎯 绕过代理`、`Ⓜ️ 微软服务`、`🍎 苹果服务` 默认 DIRECT；`🚧 屏蔽访问`、`🛑 广告过滤` 及各广告组默认拦截。
+- 缓存优先返回并在后台刷新；追加 `&refresh=1` 可强制重新下载。
 
 ## 📝 配置说明
 

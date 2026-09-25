@@ -906,9 +906,14 @@
                 
                 if (data.success) {
                     if (token) {
-                        showResult(data.subscribe_url || `${window.location.origin}/api/subscribe?token=${token}`, token, true);
+                        showResult(
+                            data.subscribe_url || `${window.location.origin}/api/subscribe?token=${token}`,
+                            token,
+                            true,
+                            data.subscribe_url_v2 || `${window.location.origin}/api/subscribe/v2?token=${token}`
+                        );
                     } else {
-                        showResult(data.subscribe_url, data.token, false);
+                        showResult(data.subscribe_url, data.token, false, data.subscribe_url_v2);
                     }
                     showToast('订阅链接生成成功', 'success');
                 } else {
@@ -923,7 +928,7 @@
         });
         
         // 显示结果
-        function showResult(subscribeUrl, token, isUpdate) {
+        function showResult(subscribeUrl, token, isUpdate, subscribeUrlV2) {
             const resultDiv = document.getElementById('result');
             const title = isUpdate ? '配置更新成功' : '订阅链接生成成功';
             const hint = isUpdate ? '配置已更新，订阅链接保持不变' : '请妥善保管 Token，下次可用于更新配置';
@@ -959,6 +964,26 @@
                                 复制
                             </button>
                         </div>
+
+                        ${subscribeUrlV2 ? `
+                        <div>
+                            <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">V2（固定规则 · SuperSub 置顶）</div>
+                            <div class="flex gap-2">
+                                <input
+                                    type="text"
+                                    class="flex-1 px-4 py-3 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300"
+                                    value="${escapeHtml(subscribeUrlV2)}"
+                                    readonly
+                                    id="subscribeUrlV2"
+                                >
+                                <button
+                                    type="button"
+                                    onclick="copyToClipboard('subscribeUrlV2')"
+                                    class="px-4 py-3 rounded-xl bg-violet-600 hover:bg-violet-700 shadow-sm text-white font-medium transition-all flex items-center gap-2 flex-shrink-0"
+                                >复制</button>
+                            </div>
+                        </div>` : ''}
+
                         
                         <div class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
                             <svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
