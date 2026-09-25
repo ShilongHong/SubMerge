@@ -28,14 +28,14 @@
                 <span class="brand-name">SubMerge</span>
                 <span class="brand-sub">Clash 订阅合并</span>
             </a>
+            <div class="mode-switch" role="group" aria-label="模式">
+                <button type="button" class="mode-btn" id="modeNew" aria-pressed="true">新建</button>
+                <button type="button" class="mode-btn" id="openLoad" aria-pressed="false">修改已有</button>
+            </div>
             <div class="topbar-actions">
-                <button type="button" class="btn btn-ghost" id="openLoad">
-                    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 7a4 4 0 1 1-3.9 4.9L4 19v-3h3v-3h3l1.1-1.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    <span>修改已有订阅</span>
-                </button>
                 <button type="button" class="icon-btn" id="themeToggle" aria-label="切换深色模式">
-                    <svg class="icon icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-                    <svg class="icon icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                    <svg class="icon icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                    <svg class="icon icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
                 </button>
             </div>
         </div>
@@ -47,9 +47,9 @@
                 <h1>把多个机场订阅合并成一个 Clash 链接</h1>
                 <p class="lead">添加你手上的订阅，保存后得到一个永久链接。以后增减订阅、换机场，回到这里修改即可，客户端里的链接不用换。</p>
                 <ol class="howto">
-                    <li><span class="howto-no">1</span><div><strong>添加订阅</strong><span>粘贴订阅链接，或上传配置文件</span></div></li>
-                    <li><span class="howto-no">2</span><div><strong>确认设置</strong><span>选择分流规则和流量信息来自哪个订阅</span></div></li>
-                    <li><span class="howto-no">3</span><div><strong>保存并导入</strong><span>复制生成的链接，添加到 Clash 客户端</span></div></li>
+                    <li><svg class="howto-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span><strong>添加订阅</strong>粘贴订阅链接，或上传配置文件</span></li>
+                    <li><svg class="howto-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="16" cy="7" r="2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="10" cy="17" r="2" fill="none" stroke="currentColor" stroke-width="1.8"/></svg><span><strong>确认设置</strong>选择分流规则和流量信息来自哪个订阅</span></li>
+                    <li><svg class="howto-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8" fill="none" stroke="currentColor" stroke-width="1.8"/></svg><span><strong>保存并导入</strong>复制生成的链接，添加到 Clash 客户端</span></li>
                 </ol>
             </section>
 

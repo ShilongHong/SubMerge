@@ -495,7 +495,13 @@
         el.editToken.textContent = shortToken(token);
         el.editToken.title = token;
         $('.btn-label', el.submitBtn).textContent = '保存修改';
+        setModeSwitch(true);
         updateStatus();
+    }
+
+    function setModeSwitch(editing) {
+        $('#modeNew').setAttribute('aria-pressed', String(!editing));
+        $('#openLoad').setAttribute('aria-pressed', String(editing));
     }
 
     function startNew() {
@@ -507,6 +513,7 @@
         el.intro.hidden = false;
         el.editBanner.hidden = true;
         $('.btn-label', el.submitBtn).textContent = '保存并生成链接';
+        setModeSwitch(false);
         hideResult();
         updateStatus();
         if (window.history.replaceState) window.history.replaceState(null, '', window.location.pathname);
@@ -764,6 +771,15 @@
         });
         $('#openLoad').addEventListener('click', openLoadDialog);
         $('#startNew').addEventListener('click', startNew);
+        $('#modeNew').addEventListener('click', function () {
+            if (state.token) return startNew();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            $('.sub-name', cards()[0]).focus({ preventScroll: true });
+        });
+        var topbar = $('.topbar');
+        var onScroll = function () { topbar.classList.toggle('is-scrolled', window.scrollY > 4); };
+        window.addEventListener('scroll', onScroll, { passive: true });
+        onScroll();
         $('#themeToggle').addEventListener('click', toggleTheme);
         $('#copyToken').addEventListener('click', function () { copyText(state.token, 'Token'); });
         $('#copyEditLink').addEventListener('click', function () {
