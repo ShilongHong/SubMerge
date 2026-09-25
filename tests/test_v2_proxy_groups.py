@@ -147,6 +147,36 @@ class V2FrozenRulesTest(unittest.TestCase):
         self.assertIn('DOMAIN-SUFFIX,scholar.google.com,🌏 学术网站', academic_rules)
         self.assertNotIn('DOMAIN-SUFFIX,scholar.google.com,挑剔的网站', merged['rules'])
 
+    def test_check_reports_each_subscription(self):
+        token = self.create_config(second_in_rules=True)
+        response = self.client.get(f'/api/check/{token}')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data['main'], '主订阅')
+        results = {sub['name']: sub for sub in data['subscriptions']}
+        self.assertEqual(list(results), ['主订阅', '第二订阅'])
+        for sub in results.values():
+            self.assertTrue(sub['ok'])
+            self.assertEqual(sub['nodes'], 1)
+            self.assertEqual(sub['source'], 'file')
+
+        # 上传文件丢失时单独报告，不影响其他订阅
+        config = submerge.load_config(token)
+        Path(submerge.FILES_DIR, f"{config['subscriptions'][1]['file_md5']}.txt").unlink()
+        results = self.client.get(f'/api/check/{token}').get_json()['subscriptions']
+        self.assertTrue(results[0]['ok'])
+        self.assertFalse(results[1]['ok'])
+        self.assertIn('重新上传', results[1]['error'])
+
+        self.assertEqual(self.client.get('/api/check/0000').status_code, 404)
+
+    def test_index_page_renders(self):
+        response = self.client.get('/')
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn('/static/app.js', html)
+        self.assertIn('/static/app.css', html)
+
 
 if __name__ == '__main__':
     unittest.main()
