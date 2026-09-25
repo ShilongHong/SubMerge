@@ -75,7 +75,7 @@ class V2FrozenRulesTest(unittest.TestCase):
         # 规则组按模板顺序输出，名称统一以 emoji 开头。
         rule_groups = names[4:]
         self.assertEqual(rule_groups, [group['name'] for group in template['proxy_groups']])
-        self.assertEqual(rule_groups[0], '🧲 海外AI')
+        self.assertEqual(rule_groups[:3], ['🧲 OpenAI', '🧲 Claude', '🧲 海外AI'])
         self.assertEqual(rule_groups[-1], '🚧 屏蔽访问')
         self.assertTrue(all(not name[0].isascii() for name in rule_groups))
         self.assertNotIn('BLOCK', groups)
@@ -86,7 +86,7 @@ class V2FrozenRulesTest(unittest.TestCase):
                          ['主订阅', '第二订阅', '主订阅_Auto', '[主订阅]_🇭🇰 A', '[第二订阅]_🇯🇵 B'])
 
         # 业务组默认 SuperSub，其余成员与 V1 的参与规则一致。
-        for name in ('🐟 漏网之鱼', '🧲 海外AI', '📥 下载', '🌏 学术网站'):
+        for name in ('🐟 漏网之鱼', '🧲 OpenAI', '🧲 Claude', '🧲 海外AI', '📥 下载', '🌏 学术网站'):
             self.assertEqual(groups[name]['proxies'][0], 'SuperSub')
         # 每个规则组都有 SuperSub、DIRECT、REJECT、PASS 和参与规则的节点。
         for name in rule_groups:
@@ -103,6 +103,10 @@ class V2FrozenRulesTest(unittest.TestCase):
             self.assertTrue(set(group['proxies']) <= valid, group['name'])
         self.assertTrue(all(submerge.v2_rule_target(rule) in valid for rule in v2['rules']))
         self.assertEqual(v2['rules'][-1], 'MATCH,🐟 漏网之鱼')
+        # ChatGPT 与 Claude 分组，Gemini 等其他 AI 留在海外AI。
+        self.assertIn('DOMAIN-SUFFIX,chatgpt.com,🧲 OpenAI', v2['rules'])
+        self.assertIn('DOMAIN-SUFFIX,claude.ai,🧲 Claude', v2['rules'])
+        self.assertIn('DOMAIN-SUFFIX,gemini.google.com,🧲 海外AI', v2['rules'])
 
     def test_in_rules_nodes_join_business_groups(self):
         token = self.create_config(second_in_rules=True)
@@ -146,6 +150,36 @@ class V2FrozenRulesTest(unittest.TestCase):
         self.assertIn('DOMAIN-SUFFIX,arxiv.org,🌏 学术网站', academic_rules)
         self.assertIn('DOMAIN-SUFFIX,scholar.google.com,🌏 学术网站', academic_rules)
         self.assertNotIn('DOMAIN-SUFFIX,scholar.google.com,挑剔的网站', merged['rules'])
+
+    def test_check_reports_each_subscription(self):
+        token = self.create_config(second_in_rules=True)
+        response = self.client.get(f'/api/check/{token}')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data['main'], '主订阅')
+        results = {sub['name']: sub for sub in data['subscriptions']}
+        self.assertEqual(list(results), ['主订阅', '第二订阅'])
+        for sub in results.values():
+            self.assertTrue(sub['ok'])
+            self.assertEqual(sub['nodes'], 1)
+            self.assertEqual(sub['source'], 'file')
+
+        # 上传文件丢失时单独报告，不影响其他订阅
+        config = submerge.load_config(token)
+        Path(submerge.FILES_DIR, f"{config['subscriptions'][1]['file_md5']}.txt").unlink()
+        results = self.client.get(f'/api/check/{token}').get_json()['subscriptions']
+        self.assertTrue(results[0]['ok'])
+        self.assertFalse(results[1]['ok'])
+        self.assertIn('重新上传', results[1]['error'])
+
+        self.assertEqual(self.client.get('/api/check/0000').status_code, 404)
+
+    def test_index_page_renders(self):
+        response = self.client.get('/')
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn('/static/app.js', html)
+        self.assertIn('/static/app.css', html)
 
 
 if __name__ == '__main__':

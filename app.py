@@ -1971,6 +1971,53 @@ def create_subscription():
     except Exception as e:
         return jsonify({'error': f'创建失败: {str(e)}'}), 500
 
+@app.route('/api/check/<token>')
+def check_subscriptions(token):
+    """逐个检测已保存的订阅能否获取，返回节点数和流量信息，供配置页展示。"""
+    config = load_config(token)
+    if not config:
+        return jsonify({'error': '无效的Token'}), 404
+    subscriptions = config.get('subscriptions', [])
+    if not subscriptions:
+        return jsonify({'error': '该配置没有订阅'}), 400
+    force_refresh = request.args.get('refresh', '').lower() in {'1', 'true', 'yes'}
+    main_name = next((s.get('name') for s in subscriptions if s.get('is_main')), subscriptions[0].get('name'))
+
+    def _check_one(sub):
+        name = sub.get('name', '')
+        result = {'name': name, 'source': 'file' if sub.get('file_md5') and not sub.get('url') else 'url',
+                  'ok': False, 'nodes': 0, 'traffic': '', 'error': ''}
+        try:
+            if result['source'] == 'file':
+                content = load_uploaded_file(sub['file_md5'])
+                if not content:
+                    result['error'] = '上传的文件已丢失，请重新上传'
+                    return result
+                data, userinfo = parse_local_subscription(content), ''
+                if not data:
+                    result['error'] = '文件内容无法识别'
+                    return result
+            else:
+                data, userinfo = download_subscription(sub.get('url', ''), prefer_cache=not force_refresh)
+                if not data:
+                    result['error'] = '下载失败或内容无法识别'
+                    return result
+            result['ok'] = True
+            result['nodes'] = len(data.get('proxies') or [])
+            result['rules'] = len(data.get('rules') or [])
+            if userinfo:
+                result['traffic'] = parse_traffic_info(userinfo).replace('♻️ ', '')
+        except Exception as e:
+            log(f"⚠️ 检测订阅失败: {name}: {e}")
+            result['error'] = '检测出错'
+        return result
+
+    with ThreadPoolExecutor(max_workers=min(len(subscriptions), 4)) as executor:
+        results = list(executor.map(_check_one, subscriptions))
+
+    return jsonify({'success': True, 'main': main_name, 'subscriptions': results})
+
+
 @app.route('/api/subscribe')
 def subscribe_with_token():
     """通过Token获取订阅"""
