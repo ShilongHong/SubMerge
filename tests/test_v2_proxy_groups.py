@@ -75,7 +75,7 @@ class V2FrozenRulesTest(unittest.TestCase):
         # 规则组按模板顺序输出，名称统一以 emoji 开头。
         rule_groups = names[4:]
         self.assertEqual(rule_groups, [group['name'] for group in template['proxy_groups']])
-        self.assertEqual(rule_groups[0], '🧲 海外AI')
+        self.assertEqual(rule_groups[:3], ['🧲 OpenAI', '🧲 Claude', '🧲 海外AI'])
         self.assertEqual(rule_groups[-1], '🚧 屏蔽访问')
         self.assertTrue(all(not name[0].isascii() for name in rule_groups))
         self.assertNotIn('BLOCK', groups)
@@ -86,7 +86,7 @@ class V2FrozenRulesTest(unittest.TestCase):
                          ['主订阅', '第二订阅', '主订阅_Auto', '[主订阅]_🇭🇰 A', '[第二订阅]_🇯🇵 B'])
 
         # 业务组默认 SuperSub，其余成员与 V1 的参与规则一致。
-        for name in ('🐟 漏网之鱼', '🧲 海外AI', '📥 下载', '🌏 学术网站'):
+        for name in ('🐟 漏网之鱼', '🧲 OpenAI', '🧲 Claude', '🧲 海外AI', '📥 下载', '🌏 学术网站'):
             self.assertEqual(groups[name]['proxies'][0], 'SuperSub')
         # 每个规则组都有 SuperSub、DIRECT、REJECT、PASS 和参与规则的节点。
         for name in rule_groups:
@@ -103,6 +103,10 @@ class V2FrozenRulesTest(unittest.TestCase):
             self.assertTrue(set(group['proxies']) <= valid, group['name'])
         self.assertTrue(all(submerge.v2_rule_target(rule) in valid for rule in v2['rules']))
         self.assertEqual(v2['rules'][-1], 'MATCH,🐟 漏网之鱼')
+        # ChatGPT 与 Claude 分组，Gemini 等其他 AI 留在海外AI。
+        self.assertIn('DOMAIN-SUFFIX,chatgpt.com,🧲 OpenAI', v2['rules'])
+        self.assertIn('DOMAIN-SUFFIX,claude.ai,🧲 Claude', v2['rules'])
+        self.assertIn('DOMAIN-SUFFIX,gemini.google.com,🧲 海外AI', v2['rules'])
 
     def test_in_rules_nodes_join_business_groups(self):
         token = self.create_config(second_in_rules=True)
