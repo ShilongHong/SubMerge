@@ -35,8 +35,12 @@ class V2FrozenRulesTest(unittest.TestCase):
             'rules': [f'DOMAIN-SUFFIX,{domain},{group}', f'MATCH,{group}']
         }, allow_unicode=True)
 
-    def create_config(self, second_in_rules):
+    def create_config(self, second_in_rules, main_dns=None):
         main = self.subscription('🇭🇰 A', '🚀 Main', 'a.example', '1.1.1.1')
+        if main_dns is not None:
+            data = yaml.safe_load(main)
+            data['dns'] = main_dns
+            main = yaml.safe_dump(data, allow_unicode=True)
         second = self.subscription('🇯🇵 B', 'Second', 'b.example', '2.2.2.2')
         response = self.client.post('/api/create', data={
             'sub_name_0': '主订阅', 'sub_url_0': '', 'is_main_0': 'true',
@@ -113,6 +117,65 @@ class V2FrozenRulesTest(unittest.TestCase):
         v2 = self.fetch(f'/api/subscribe/v2?token={token}')
         groups = {group['name']: group for group in v2['proxy-groups']}
         self.assertIn('[第二订阅]_🇯🇵 B', groups['🐟 漏网之鱼']['proxies'])
+
+    def test_v2_remaps_removed_dns_groups_in_all_resolver_fields(self):
+        old = 'https://dns.example/dns-query?key=value#🚀 Main&h3=true&ecs=1.1.1.1/24'
+        new = 'https://dns.example/dns-query?key=value#SuperSub&h3=true&ecs=1.1.1.1/24'
+        encoded = 'tls://dns.example#h3=true&%F0%9F%9A%80%20Main&skip-cert-verify=true'
+        rewritten = 'tls://dns.example#h3=true&SuperSub&skip-cert-verify=true'
+        fields = ('nameserver', 'fallback', 'default-nameserver',
+                  'proxy-server-nameserver', 'direct-nameserver')
+        dns = {'enable': True, 'enhanced-mode': 'fake-ip', 'respect-rules': True,
+               'fake-ip-filter': ['*.lan'], **{key: [old, encoded] for key in fields}}
+        for key in ('nameserver-policy', 'proxy-server-nameserver-policy'):
+            dns[key] = {'+.example': old, 'geosite:private': [encoded, '223.5.5.5']}
+        token = self.create_config(second_in_rules=True, main_dns=dns)
+
+        v1 = self.fetch(f'/api/subscribe?token={token}')
+        v2 = self.fetch(f'/api/subscribe/v2?token={token}')
+        self.assertEqual(v1['dns'], dns)
+        self.assertNotIn('🚀 Main', {g['name'] for g in v2['proxy-groups']})
+        for key in fields:
+            self.assertEqual(v2['dns'][key], [new, rewritten], key)
+        for key in ('nameserver-policy', 'proxy-server-nameserver-policy'):
+            self.assertEqual(v2['dns'][key], {
+                '+.example': new, 'geosite:private': [rewritten, '223.5.5.5']
+            }, key)
+        for key in ('enable', 'enhanced-mode', 'respect-rules', 'fake-ip-filter'):
+            self.assertEqual(v2['dns'][key], dns[key])
+        # V2 转换不应修改传入的 V1 DNS 对象。
+        original_dns = v1['dns']
+        submerge.build_v2_config(v1, [{'name': '主订阅'}, {'name': '第二订阅'}])
+        self.assertEqual(v1['dns']['nameserver'], [new, rewritten])
+        self.assertEqual(original_dns, dns)
+
+    def test_v2_preserves_retained_dns_refs_and_parameters(self):
+        resolvers = [
+            'https://dns.example/dns-query#DIRECT',
+            'https://dns.example/dns-query#REJECT',
+            'https://dns.example/dns-query#主订阅',
+            'https://dns.example/dns-query#主订阅_Auto',
+            'https://dns.example/dns-query#🧲 OpenAI',
+            'https://dns.example/dns-query#[主订阅]_🇭🇰 A',
+            'https://dns.example/dns-query#eth0',
+            'https://dns.example/dns-query#h3=true&ecs=1.1.1.1/24',
+            'https://dns.example/dns-query#interface=🚀 Main',
+            'https://dns.example/dns-query?proxy=🚀 Main',
+            'system', 'dhcp://eth0', '223.5.5.5',
+        ]
+        dns = {'enable': True, 'nameserver': resolvers,
+               'nameserver-policy': {'🚀 Main.example': resolvers},
+               'fake-ip-filter': ['🚀 Main.example'],
+               'fallback-filter': {'domain': ['🚀 Main.example']}}
+        token = self.create_config(second_in_rules=True, main_dns=dns)
+        v2 = self.fetch(f'/api/subscribe/v2?token={token}')
+        self.assertEqual(v2['dns'], dns)
+
+    def test_absent_subscription_dns_stays_empty(self):
+        token = self.create_config(second_in_rules=True)
+        for path in ('/api/subscribe', '/api/subscribe/v2'):
+            with self.subTest(path=path):
+                self.assertEqual(self.fetch(f'{path}?token={token}')['dns'], {})
 
     def test_pass_only_for_mihomo_clients(self):
         token = self.create_config(second_in_rules=True)

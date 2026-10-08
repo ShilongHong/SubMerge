@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, jsonify, Response
 import requests
 import yaml
 import base64
+import copy
 from datetime import datetime, timezone
 import re
 import hashlib
@@ -12,6 +13,7 @@ import threading
 import time
 from werkzeug.utils import secure_filename
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import quote, unquote
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 限制上传文件大小为16MB
@@ -861,6 +863,40 @@ def v2_rule_target(rule):
     return parts[index]
 
 
+def remap_dns_proxy_groups(dns_config, group_map):
+    """只替换 DNS 地址片段中的已删除代理组，保留参数、接口和其他设置。"""
+    if not isinstance(dns_config, dict) or not group_map:
+        return dns_config
+
+    def remap_resolvers(value):
+        if isinstance(value, list):
+            return [remap_resolvers(item) for item in value]
+        if not isinstance(value, str):
+            return value
+        address, separator, fragment = value.partition('#')
+        if not separator:
+            return value
+        tokens = fragment.split('&')
+        for index, token in enumerate(tokens):
+            name = unquote(token)
+            # mihomo 将 key=value 视为 DNS 参数，单独的名称才是出口引用。
+            if '=' not in name and name in group_map:
+                tokens[index] = quote(group_map[name], safe='')
+        return address + separator + '&'.join(tokens)
+
+    # V2 的 DNS 修改不能污染 V1 或订阅缓存中的嵌套对象。
+    dns = copy.deepcopy(dns_config)
+    for key in ('nameserver', 'fallback', 'default-nameserver',
+                'proxy-server-nameserver', 'direct-nameserver'):
+        if key in dns:
+            dns[key] = remap_resolvers(dns[key])
+    for key in ('nameserver-policy', 'proxy-server-nameserver-policy'):
+        if isinstance(dns.get(key), dict):
+            dns[key] = {domain: remap_resolvers(resolvers)
+                        for domain, resolvers in dns[key].items()}
+    return dns
+
+
 def build_v2_config(merged_config, subscriptions, allow_pass=False):
     """在 V1 合并结果上套用固化规则：SuperSub 置顶并包含全部节点，业务组默认选择 SuperSub。"""
     template = load_v2_template()
@@ -913,6 +949,9 @@ def build_v2_config(merged_config, subscriptions, allow_pass=False):
     merged_config['proxy-groups'] = groups
 
     group_names = {group['name'] for group in groups} | set(policies)
+    if 'dns' in merged_config:
+        removed_groups = {name: super_name for name in v1_groups if name not in group_names}
+        merged_config['dns'] = remap_dns_proxy_groups(merged_config['dns'], removed_groups)
     merged_config['rules'] = [rule for rule in template_rules
                               if v2_rule_target(rule) in group_names]
     return merged_config
@@ -1026,105 +1065,9 @@ def merge_subscriptions(subscriptions, prefer_cache=False):
         'mode': main_sub.get('mode', 'Rule'),
         'log-level': main_sub.get('log-level', 'info'),
         'external-controller': main_sub.get('external-controller', '127.0.0.1:9090'),
-        
-        
-    #     'dns': main_sub.get('dns', {}),
-    # }
-    
-        # DNS 固定使用默认配置，不读取主订阅
-        'dns': {
-            'enable': True,
-            'listen': '0.0.0.0:1053',
-
-            'ipv6': False,
-
-            'enhanced-mode': 'fake-ip',
-            'fake-ip-range': '198.18.0.1/16',
-
-            'use-hosts': True,
-            'use-system-hosts': True,
-
-            # 临时关闭，用于排查
-            'respect-rules': False,
-            'prefer-h3': False,
-
-            'default-nameserver': [
-                '223.5.5.5',
-                '119.29.29.29',
-            ],
-
-            'proxy-server-nameserver': [
-                '223.5.5.5',
-                '119.29.29.29',
-            ],
-
-            # 临时也使用最简单的 DNS
-            'nameserver': [
-                '223.5.5.5',
-                '119.29.29.29',
-            ],
-
-            # 系统联网检测、局域网等特殊域名使用国内 DNS
-            'nameserver-policy': {
-                '+.captive.apple.com,+.msftconnecttest.com,+.connect.rom.miui.com,+.connectivitycheck.gstatic.com,+.connectivitycheck.platform.hicloud.com': [
-                    '119.29.29.29',
-                    '223.5.5.5',
-                    '114.114.114.114',
-                ],
-
-                'geosite:private': [
-                    '119.29.29.29',
-                    '223.5.5.5',
-                    '114.114.114.114',
-                ],
-            },
-
-            'fake-ip-filter': [
-                '*.lan',
-                '*.localdomain',
-                '*.invalid',
-                '*.localhost',
-                '*.test',
-                '*.local',
-                '*.home.arpa',
-
-                # Windows 网络检测
-                '+.msftncsi.com',
-                '+.msftconnecttest.com',
-                'www.msftconnecttest.com',
-
-                # macOS / iOS 网络检测
-                'captive.apple.com',
-
-                # Android / 手机网络检测
-                'connect.rom.miui.com',
-                'wifi.vivo.com.cn',
-                'connectivitycheck.platform.hicloud.com',
-
-                # 时间同步
-                '*.time.edu.cn',
-                '*.ntp.org.cn',
-                '+.pool.ntp.org',
-
-                # 国内服务兼容
-                '+.bilivideo.com',
-                '+.douyinvod.com',
-                '+.feishu.cn',
-                '+.dingtalk.com',
-                '+.chat.bilibili.com',
-
-                # STUN
-                'stun.*.*',
-                'stun.*.*.*',
-
-                # 原配置中的特殊规则
-                '+.definition-meaning.top',
-                '+.sfr-bouygues.cloud',
-                '+.portail-offres.top',
-            ],
-        },
+        'dns': main_sub.get('dns', {}),
     }
-    
+
     # 复制主订阅的其他配置
     for key in main_sub:
         if key not in merged_config and key not in ['proxies', 'proxy-groups', 'rules']:
