@@ -938,10 +938,11 @@ def build_v2_config(merged_config, subscriptions, allow_pass=False):
     groups = [super_group] + [v1_groups[name] for name in sub_names + auto_names]
     if info_group:
         groups.append(info_group)
-    # 每个规则组：模板指定的默认项在前，然后是 SuperSub、内置策略、订阅组、Auto 组和参与规则的节点。
+    # 模板默认项在前；策略组只补充内置策略，业务组再补充订阅和节点选项。
     common_refs = [super_name] + policies + sub_names + auto_names + rule_nodes
     for group in template_groups:
-        refs = [ref for ref in group.get('proxies', []) if ref in valid_refs] + common_refs
+        extra_refs = common_refs if group.get('include_nodes', True) else policies
+        refs = [ref for ref in group.get('proxies', []) if ref in valid_refs] + extra_refs
         groups.append({
             'name': group['name'],
             'type': group.get('type', 'select'),

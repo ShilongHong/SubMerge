@@ -102,6 +102,7 @@ python app.py
 V2 的一些细节：
 
 - `Ⓜ️ 微软服务`、`🍎 苹果服务` 默认直连；`🎯 绕过代理`、`🛑 广告过滤`、各广告组、`🚧 屏蔽访问` 保持直连或拦截。
+- `🎯 绕过代理`、`🛑 广告过滤`、`📵 屏蔽视频广告`、`🚫 常见广告域名`、`🚧 屏蔽访问` 只提供精简策略选项，不加入 `SuperSub`、订阅组、测速组或节点；广告过滤保留屏蔽访问和绕过代理两个关联组。它们仍提供 `DIRECT`、`REJECT`，支持 mihomo 的客户端另有 `PASS`。模板通过 `include_nodes: false` 关闭订阅和节点选项的自动添加，其他业务组保持原来的候选列表。
 - `PASS` 策略只对 mihomo 内核的客户端加入（按 User-Agent 识别 Clash Verge、Clash Meta、mihomo party、FlClash、Nyanpasu），旧版 Clash 内核不认识它。
 - 要修改 V2 规则，直接编辑 `templates_storage/v2_rules.json`。规则目标只能是模板中的分组、`SuperSub`、`DIRECT`、`REJECT` 或 `PASS`。
 - DNS 优先沿用「分流规则来源」订阅的设置；未提供或为空时使用内置默认 DNS。默认配置启用 fake-ip，使用 `223.5.5.5`、`119.29.29.29` 解析域名和节点地址。
