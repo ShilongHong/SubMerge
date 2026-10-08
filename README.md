@@ -88,7 +88,7 @@ python app.py
 
 ## V1 和 V2 的区别
 
-两个链接的节点、订阅分组、测速组和流量信息完全相同，只有**代理组和分流规则**不同。可以同时导入对比，随时切换。
+两个链接的节点、订阅分组、测速组和流量信息完全相同，主要区别是**代理组和分流规则**；V2 还会同步调整 DNS 中对被删除代理组的引用。可以同时导入对比，随时切换。
 
 | | V1：沿用机场规则 | V2：固定规则 + SuperSub |
 |---|---|---|
@@ -104,6 +104,7 @@ V2 的一些细节：
 - `Ⓜ️ 微软服务`、`🍎 苹果服务` 默认直连；`🎯 绕过代理`、`🛑 广告过滤`、各广告组、`🚧 屏蔽访问` 保持直连或拦截。
 - `PASS` 策略只对 mihomo 内核的客户端加入（按 User-Agent 识别 Clash Verge、Clash Meta、mihomo party、FlClash、Nyanpasu），旧版 Clash 内核不认识它。
 - 要修改 V2 规则，直接编辑 `templates_storage/v2_rules.json`。规则目标只能是模板中的分组、`SuperSub`、`DIRECT`、`REJECT` 或 `PASS`。
+- DNS 沿用「分流规则来源」订阅的设置；未提供 DNS 时输出 `dns: {}`，不再注入内置 DNS。V2 会将 DNS 地址中对被删除代理组的引用映射到 `SuperSub`，例如 `https://dns.example/dns-query#原代理组` 变为 `https://dns.example/dns-query#SuperSub`；现有组、内置策略和 `h3=true` 等 DNS 参数保持原样。普通 DNS 列表、`nameserver-policy` 和 `proxy-server-nameserver-policy` 都会同步处理。
 
 ## 更新与缓存
 
@@ -124,7 +125,7 @@ proxy-groups:
   下载、挑剔的网站、TikTok解锁、屏蔽视频广告、常见广告域名、BLOCK、🌏 学术网站
   机场原有的代理组        加入所有「参与分流」的节点；与内置组重名时加 _group 后缀
 rules:          内置规则 + 分流规则来源的规则（指向不存在分组的规则会被丢弃）
-其他顶层配置:    来自分流规则来源订阅；DNS 使用内置配置
+其他顶层配置:    来自分流规则来源订阅；DNS 沿用该订阅的设置，未提供时输出空对象
 ```
 
 ## API
