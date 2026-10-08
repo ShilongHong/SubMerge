@@ -9,6 +9,7 @@ import hashlib
 import secrets
 import json
 import os
+import ipaddress
 import threading
 import time
 from werkzeug.utils import secure_filename
@@ -957,6 +958,175 @@ def build_v2_config(merged_config, subscriptions, allow_pass=False):
     return merged_config
 
 
+# 主订阅没有 DNS 配置时使用的默认 DNS
+DEFAULT_DNS = {
+    'enable': True,
+    'listen': '0.0.0.0:1053',
+
+    'ipv6': False,
+
+    'enhanced-mode': 'fake-ip',
+    'fake-ip-range': '198.18.0.1/16',
+
+    'use-hosts': True,
+    'use-system-hosts': True,
+
+    'respect-rules': False,
+    'prefer-h3': False,
+
+    'default-nameserver': [
+        '223.5.5.5',
+        '119.29.29.29',
+    ],
+
+    'proxy-server-nameserver': [
+        '223.5.5.5',
+        '119.29.29.29',
+    ],
+
+    'nameserver': [
+        '223.5.5.5',
+        '119.29.29.29',
+    ],
+
+    # 系统联网检测、局域网等特殊域名使用国内 DNS
+    'nameserver-policy': {
+        '+.captive.apple.com,+.msftconnecttest.com,+.connect.rom.miui.com,+.connectivitycheck.gstatic.com,+.connectivitycheck.platform.hicloud.com': [
+            '119.29.29.29',
+            '223.5.5.5',
+            '114.114.114.114',
+        ],
+
+        'geosite:private': [
+            '119.29.29.29',
+            '223.5.5.5',
+            '114.114.114.114',
+        ],
+    },
+
+    'fake-ip-filter': [
+        '*.lan',
+        '*.localdomain',
+        '*.invalid',
+        '*.localhost',
+        '*.test',
+        '*.local',
+        '*.home.arpa',
+
+        # Windows 网络检测
+        '+.msftncsi.com',
+        '+.msftconnecttest.com',
+        'www.msftconnecttest.com',
+
+        # macOS / iOS 网络检测
+        'captive.apple.com',
+
+        # Android / 手机网络检测
+        'connect.rom.miui.com',
+        'wifi.vivo.com.cn',
+        'connectivitycheck.platform.hicloud.com',
+
+        # 时间同步
+        '*.time.edu.cn',
+        '*.ntp.org.cn',
+        '+.pool.ntp.org',
+
+        # 国内服务兼容
+        '+.bilivideo.com',
+        '+.douyinvod.com',
+        '+.feishu.cn',
+        '+.dingtalk.com',
+        '+.chat.bilibili.com',
+
+        # STUN
+        'stun.*.*',
+        'stun.*.*.*',
+    ],
+}
+
+
+def is_ip_address(host):
+    """判断节点 server 是否为 IP（IPv4 或 IPv6 字面量）"""
+    try:
+        ipaddress.ip_address(str(host).strip('[]'))
+        return True
+    except ValueError:
+        return False
+
+
+def proxy_server_domains(proxies):
+    """按出现顺序返回节点 server 中的域名（去重，跳过 IP）"""
+    domains = []
+    seen = set()
+    for proxy in proxies:
+        server = str(proxy.get('server') or '').strip()
+        if server and not is_ip_address(server) and server not in seen:
+            seen.add(server)
+            domains.append(server)
+    return domains
+
+
+def merge_subscription_hosts(downloaded_subs, main_sub):
+    """主订阅的 hosts 全部保留；其他订阅只取指向自己节点域名的条目，避免劫持其他域名"""
+    hosts = dict(main_sub.get('hosts') or {})
+    for sub_info in downloaded_subs:
+        sub_data = sub_info['data']
+        sub_hosts = sub_data.get('hosts')
+        if sub_data is main_sub or not isinstance(sub_hosts, dict):
+            continue
+        own_domains = set(proxy_server_domains(sub_data.get('proxies', [])))
+        for domain, target in sub_hosts.items():
+            if domain in own_domains and domain not in hosts:
+                hosts[domain] = target
+    return hosts
+
+
+def build_merged_dns(main_dns, proxies, has_hosts=False):
+    """生成合并后的 DNS：沿用主订阅的配置，只修正会让其他订阅节点失效的项。
+
+    机场常把 proxy-server-nameserver 指向 Clash 自己的 DNS（例如 udp://127.0.0.1:7874），
+    借 hosts 把自家节点域名指向中转入口。fake-ip 模式下，不在 fake-ip-filter 里的
+    其他订阅节点域名会拿到 198.18.x 假地址而连不上，所以把所有节点域名加入 fake-ip-filter。
+    """
+    dns = copy.deepcopy(main_dns) if isinstance(main_dns, dict) and main_dns else copy.deepcopy(DEFAULT_DNS)
+
+    # 修复写坏的键：nameserver-policy:"+.a.com,+.b.com" → nameserver-policy 下的正常条目
+    for key in list(dns.keys()):
+        match = re.match(r'^nameserver-policy:\s*"?([^"]+?)"?\s*$', str(key))
+        if match:
+            policy = dns.get('nameserver-policy')
+            if not isinstance(policy, dict):
+                policy = {}
+            policy.setdefault(match.group(1), dns[key])
+            dns['nameserver-policy'] = policy
+            del dns[key]
+
+    # hosts 里的节点域名别名要生效
+    if has_hosts:
+        dns['use-hosts'] = True
+
+    mode = dns.get('fake-ip-filter-mode', 'blacklist')
+    domains = proxy_server_domains(proxies)
+    if mode == 'rule':
+        # 规则模式必须使用规则语法，且节点例外要早于 MATCH 等宽泛规则。
+        node_rules = [f'DOMAIN,{domain},real-ip' for domain in domains]
+        node_rule_set = set(node_rules)
+        dns['fake-ip-filter'] = node_rules + [
+            rule for rule in (dns.get('fake-ip-filter') or []) if rule not in node_rule_set
+        ]
+    elif mode != 'whitelist':
+        fake_ip_filter = list(dns.get('fake-ip-filter') or [])
+        existing = set(fake_ip_filter)
+        for domain in domains:
+            if domain not in existing:
+                fake_ip_filter.append(domain)
+                existing.add(domain)
+        if fake_ip_filter:
+            dns['fake-ip-filter'] = fake_ip_filter
+
+    return dns
+
+
 def merge_subscriptions(subscriptions, prefer_cache=False):
     """
     合并多个订阅
@@ -1065,12 +1235,11 @@ def merge_subscriptions(subscriptions, prefer_cache=False):
         'mode': main_sub.get('mode', 'Rule'),
         'log-level': main_sub.get('log-level', 'info'),
         'external-controller': main_sub.get('external-controller', '127.0.0.1:9090'),
-        'dns': main_sub.get('dns', {}),
     }
 
-    # 复制主订阅的其他配置
+    # 复制主订阅的其他配置（dns 和 hosts 在节点合并后单独处理）
     for key in main_sub:
-        if key not in merged_config and key not in ['proxies', 'proxy-groups', 'rules']:
+        if key not in merged_config and key not in ['proxies', 'proxy-groups', 'rules', 'dns', 'hosts']:
             merged_config[key] = main_sub[key]
     
     # 合并所有订阅的节点
@@ -1147,6 +1316,13 @@ def merge_subscriptions(subscriptions, prefer_cache=False):
         used_names.add(info_text)
     
     merged_config['proxies'] = all_proxies
+
+    # DNS 沿用主订阅（机场可能依赖自己的 DNS / hosts 走中转），
+    # 再让其他订阅的节点域名也能解析出真实 IP
+    hosts = merge_subscription_hosts(downloaded_subs, main_sub)
+    if hosts:
+        merged_config['hosts'] = hosts
+    merged_config['dns'] = build_merged_dns(main_sub.get('dns'), all_proxies, bool(hosts))
     
     # 创建额外的代理组
     proxy_groups = []
