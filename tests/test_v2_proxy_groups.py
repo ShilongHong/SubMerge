@@ -92,11 +92,16 @@ class V2FrozenRulesTest(unittest.TestCase):
         # 业务组默认 SuperSub，其余成员与 V1 的参与规则一致。
         for name in ('🐟 漏网之鱼', '🧲 OpenAI', '🧲 Claude', '🧲 海外AI', '📥 下载', '🌏 学术网站'):
             self.assertEqual(groups[name]['proxies'][0], 'SuperSub')
-        # 每个规则组都有 SuperSub、DIRECT、REJECT、PASS 和参与规则的节点。
+        # 每个规则组都有内置策略；业务组另有订阅和节点选项。
+        compact_groups = {'🎯 绕过代理', '🛑 广告过滤', '📵 屏蔽视频广告',
+                          '🚫 常见广告域名', '🚧 屏蔽访问'}
         for name in rule_groups:
             refs = groups[name]['proxies']
-            for ref in ('SuperSub', 'DIRECT', 'REJECT', 'PASS', '[主订阅]_🇭🇰 A', '第二订阅'):
+            for ref in ('DIRECT', 'REJECT', 'PASS'):
                 self.assertIn(ref, refs, name)
+            if name not in compact_groups:
+                for ref in ('SuperSub', '[主订阅]_🇭🇰 A', '第二订阅'):
+                    self.assertIn(ref, refs, name)
             self.assertNotIn('[第二订阅]_🇯🇵 B', refs)
         self.assertEqual(groups['🎯 绕过代理']['proxies'][0], 'DIRECT')
         self.assertEqual(groups['🚧 屏蔽访问']['proxies'][0], 'REJECT')
@@ -117,6 +122,28 @@ class V2FrozenRulesTest(unittest.TestCase):
         v2 = self.fetch(f'/api/subscribe/v2?token={token}')
         groups = {group['name']: group for group in v2['proxy-groups']}
         self.assertIn('[第二订阅]_🇯🇵 B', groups['🐟 漏网之鱼']['proxies'])
+
+    def test_policy_groups_have_only_compact_choices_for_both_client_types(self):
+        token = self.create_config(second_in_rules=True)
+        expected = {
+            '🎯 绕过代理': ['DIRECT', 'REJECT'],
+            '🛑 广告过滤': ['🚧 屏蔽访问', '🎯 绕过代理', 'DIRECT', 'REJECT'],
+            '📵 屏蔽视频广告': ['REJECT', 'DIRECT'],
+            '🚫 常见广告域名': ['REJECT', 'DIRECT'],
+            '🚧 屏蔽访问': ['REJECT', 'DIRECT'],
+        }
+        for user_agent, pass_supported in (('mihomo/1.19', True), ('ClashforWindows/0.20', False)):
+            with self.subTest(user_agent=user_agent):
+                v2 = self.fetch(f'/api/subscribe/v2?token={token}', user_agent)
+                groups = {g['name']: g for g in v2['proxy-groups']}
+                for name, refs in expected.items():
+                    self.assertEqual(groups[name]['proxies'], refs + (['PASS'] if pass_supported else []))
+                self.assertEqual(v2['rules'], submerge.load_v2_template()['rules'])
+                # SuperSub 和业务组仍提供订阅组、测速组及两个订阅的节点。
+                for name in ('SuperSub', '🧲 OpenAI'):
+                    for ref in ('主订阅', '第二订阅', '主订阅_Auto',
+                                '[主订阅]_🇭🇰 A', '[第二订阅]_🇯🇵 B'):
+                        self.assertIn(ref, groups[name]['proxies'])
 
     def test_v2_remaps_removed_dns_groups_in_all_resolver_fields(self):
         old = 'https://dns.example/dns-query?key=value#🚀 Main&h3=true&ecs=1.1.1.1/24'

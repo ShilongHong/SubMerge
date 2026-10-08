@@ -131,23 +131,24 @@
   {
    "name": "🎯 绕过代理",
    "type": "select",
+   "include_nodes": false,
    "proxies": [
-    "DIRECT",
-    "SuperSub"
+    "DIRECT"
    ]
   },
   {
    "name": "🛑 广告过滤",
    "type": "select",
+   "include_nodes": false,
    "proxies": [
     "🚧 屏蔽访问",
-    "🎯 绕过代理",
-    "SuperSub"
+    "🎯 绕过代理"
    ]
   },
   {
    "name": "📵 屏蔽视频广告",
    "type": "select",
+   "include_nodes": false,
    "proxies": [
     "REJECT",
     "DIRECT"
@@ -156,6 +157,7 @@
   {
    "name": "🚫 常见广告域名",
    "type": "select",
+   "include_nodes": false,
    "proxies": [
     "REJECT",
     "DIRECT"
@@ -164,6 +166,7 @@
   {
    "name": "🚧 屏蔽访问",
    "type": "select",
+   "include_nodes": false,
    "proxies": [
     "REJECT",
     "DIRECT"
