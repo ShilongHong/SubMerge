@@ -1105,10 +1105,19 @@ def build_merged_dns(main_dns, proxies, has_hosts=False):
     if has_hosts:
         dns['use-hosts'] = True
 
-    if dns.get('fake-ip-filter-mode') != 'whitelist':
+    mode = dns.get('fake-ip-filter-mode', 'blacklist')
+    domains = proxy_server_domains(proxies)
+    if mode == 'rule':
+        # 规则模式必须使用规则语法，且节点例外要早于 MATCH 等宽泛规则。
+        node_rules = [f'DOMAIN,{domain},real-ip' for domain in domains]
+        node_rule_set = set(node_rules)
+        dns['fake-ip-filter'] = node_rules + [
+            rule for rule in (dns.get('fake-ip-filter') or []) if rule not in node_rule_set
+        ]
+    elif mode != 'whitelist':
         fake_ip_filter = list(dns.get('fake-ip-filter') or [])
         existing = set(fake_ip_filter)
-        for domain in proxy_server_domains(proxies):
+        for domain in domains:
             if domain not in existing:
                 fake_ip_filter.append(domain)
                 existing.add(domain)

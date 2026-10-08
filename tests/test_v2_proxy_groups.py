@@ -171,11 +171,11 @@ class V2FrozenRulesTest(unittest.TestCase):
         v2 = self.fetch(f'/api/subscribe/v2?token={token}')
         self.assertEqual(v2['dns'], dns)
 
-    def test_absent_subscription_dns_stays_empty(self):
+    def test_absent_subscription_dns_uses_default(self):
         token = self.create_config(second_in_rules=True)
         for path in ('/api/subscribe', '/api/subscribe/v2'):
             with self.subTest(path=path):
-                self.assertEqual(self.fetch(f'{path}?token={token}')['dns'], {})
+                self.assertEqual(self.fetch(f'{path}?token={token}')['dns'], submerge.DEFAULT_DNS)
 
     def test_pass_only_for_mihomo_clients(self):
         token = self.create_config(second_in_rules=True)

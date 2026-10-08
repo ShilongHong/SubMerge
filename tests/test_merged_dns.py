@@ -1,4 +1,5 @@
 import io
+import copy
 import tempfile
 import unittest
 from pathlib import Path
@@ -122,6 +123,55 @@ class MergedDnsTest(unittest.TestCase):
             {'enhanced-mode': 'fake-ip', 'fake-ip-filter-mode': 'whitelist', 'fake-ip-filter': ['+.x.com']},
             [proxy('A', 'a.node.org')])
         self.assertEqual(dns['fake-ip-filter'], ['+.x.com'])
+
+    def test_rule_filter_mode_preserves_valid_rules_and_node_exceptions(self):
+        original_rules = ['DOMAIN,a.node.org,real-ip', 'MATCH,fake-ip']
+        main_dns = {'enable': True, 'enhanced-mode': 'fake-ip',
+                    'fake-ip-filter-mode': 'rule', 'fake-ip-filter': original_rules}
+        token = self.create_config(
+            subscription([proxy('A', 'a.node.org')], {'dns': main_dns}),
+            subscription([proxy('B', 'b.node.org'), proxy('C', 'b.node.org'),
+                          proxy('D', '2001:db8::1')]))
+        for path in ('/api/subscribe', '/api/subscribe/v2'):
+            with self.subTest(path=path):
+                config = self.fetch(f'{path}?token={token}')
+                self.assertEqual(config['dns']['fake-ip-filter'], [
+                    'DOMAIN,a.node.org,real-ip', 'DOMAIN,b.node.org,real-ip', 'MATCH,fake-ip'
+                ])
+
+    def test_normalized_dns_policies_remap_in_v2_and_hosts_keep_main_priority(self):
+        extra = copy.deepcopy(MAIN_EXTRA)
+        extra['dns']['nameserver-policy:"+.v2.example"'] = [
+            'https://223.5.5.5/dns-query#Main&h3=true'
+        ]
+        token = self.create_config(
+            subscription([proxy('A', 'n1.main-node.org')], extra),
+            subscription([proxy('B', 'n1.main-node.org'), proxy('C', 'b.node.org')], {
+                'hosts': {'n1.main-node.org': '9.9.9.9', 'b.node.org': '8.8.8.8',
+                          'unrelated.example': '6.6.6.6'}
+            }))
+        for path, group in (('/api/subscribe/v2', 'SuperSub'), ('/api/subscribe', 'Main')):
+            with self.subTest(path=path):
+                config = self.fetch(f'{path}?token={token}')
+                self.assertEqual(config['dns']['nameserver-policy']['+.v2.example'], [
+                    f'https://223.5.5.5/dns-query#{group}&h3=true'
+                ])
+                self.assertEqual(config['hosts'], {
+                    'n1.main-node.org': 'x1.relay.top', 'b.node.org': '8.8.8.8'
+                })
+                self.assertEqual(config['dns']['fake-ip-filter'].count('n1.main-node.org'), 1)
+
+    def test_dns_merge_does_not_mutate_source_or_default(self):
+        main_dns = copy.deepcopy(MAIN_EXTRA['dns'])
+        snapshot = copy.deepcopy(main_dns)
+        merged = submerge.build_merged_dns(main_dns, [proxy('A', 'a.node.org')], has_hosts=True)
+        self.assertTrue(merged['use-hosts'])
+        self.assertEqual(main_dns, snapshot)
+        defaults = copy.deepcopy(submerge.DEFAULT_DNS)
+        for value in (None, {}):
+            merged = submerge.build_merged_dns(value, [proxy('A', 'a.node.org')])
+            self.assertEqual(merged['fake-ip-filter'][-1], 'a.node.org')
+            self.assertEqual(submerge.DEFAULT_DNS, defaults)
 
 
 if __name__ == '__main__':

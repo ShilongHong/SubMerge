@@ -104,7 +104,10 @@ V2 的一些细节：
 - `Ⓜ️ 微软服务`、`🍎 苹果服务` 默认直连；`🎯 绕过代理`、`🛑 广告过滤`、各广告组、`🚧 屏蔽访问` 保持直连或拦截。
 - `PASS` 策略只对 mihomo 内核的客户端加入（按 User-Agent 识别 Clash Verge、Clash Meta、mihomo party、FlClash、Nyanpasu），旧版 Clash 内核不认识它。
 - 要修改 V2 规则，直接编辑 `templates_storage/v2_rules.json`。规则目标只能是模板中的分组、`SuperSub`、`DIRECT`、`REJECT` 或 `PASS`。
-- DNS 沿用「分流规则来源」订阅的设置；未提供 DNS 时输出 `dns: {}`，不再注入内置 DNS。V2 会将 DNS 地址中对被删除代理组的引用映射到 `SuperSub`，例如 `https://dns.example/dns-query#原代理组` 变为 `https://dns.example/dns-query#SuperSub`；现有组、内置策略和 `h3=true` 等 DNS 参数保持原样。普通 DNS 列表、`nameserver-policy` 和 `proxy-server-nameserver-policy` 都会同步处理。
+- DNS 优先沿用「分流规则来源」订阅的设置；未提供或为空时使用内置默认 DNS。默认配置启用 fake-ip，使用 `223.5.5.5`、`119.29.29.29` 解析域名和节点地址。
+- 为防止节点域名解析成假 IP，默认 blacklist 模式会将所有节点域名去重加入 `fake-ip-filter`（跳过 IPv4/IPv6 地址）；rule 模式会前置节点的 `DOMAIN,...,real-ip` 规则，whitelist 模式保持原过滤列表。
+- 主订阅的 `hosts` 全部保留；其他订阅只补充自身节点域名的条目，同名时以主订阅为准。有 hosts 时启用 `use-hosts`，并修正形如 `nameserver-policy:"+.a.com"` 的错误 DNS 键。
+- V2 会将 DNS 地址中对被删除代理组的引用映射到 `SuperSub`，例如 `https://dns.example/dns-query#原代理组` 变为 `https://dns.example/dns-query#SuperSub`；现有组、内置策略和 `h3=true` 等 DNS 参数保持原样。普通 DNS 列表、`nameserver-policy` 和 `proxy-server-nameserver-policy` 都会同步处理。
 
 ## 更新与缓存
 
@@ -125,7 +128,8 @@ proxy-groups:
   下载、挑剔的网站、TikTok解锁、屏蔽视频广告、常见广告域名、BLOCK、🌏 学术网站
   机场原有的代理组        加入所有「参与分流」的节点；与内置组重名时加 _group 后缀
 rules:          内置规则 + 分流规则来源的规则（指向不存在分组的规则会被丢弃）
-其他顶层配置:    来自分流规则来源订阅；DNS 沿用该订阅的设置，未提供时输出空对象
+hosts:          主订阅全部保留，其他订阅只补充自身节点域名的条目
+其他顶层配置:    来自分流规则来源订阅；DNS 优先沿用该订阅，缺失或为空时使用默认配置
 ```
 
 ## API
